@@ -10,14 +10,14 @@ function openScreen(path) {
 
 <template>
   <button class="launcher-btn launcher-btn--primary" @click="openScreen('/foh')">
-    Abrir pantalla FOH
+    Open FOH Screen (N/A)
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
       <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
         stroke-linejoin="round" />
     </svg>
   </button>
   <button class="launcher-btn launcher-btn--secondary" @click="openScreen('/agent')">
-    Abrir panel de despacho
+    Open Agent Panel
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
       <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
         stroke-linejoin="round" />

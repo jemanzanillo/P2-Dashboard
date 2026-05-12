@@ -131,7 +131,12 @@ export const useQueueStore = defineStore('queue', () => {
     function finishTurn() {
         if (!activeTurn.value) return
         const t = turns.value.find(t => t.id === activeTurn.value.id)
-        if (t) t.status = 'attended'
+        if (t) {
+            t.status = 'attended'
+            if (t.calledAt && !t.durationMs) {
+                t.durationMs = Date.now() - new Date(t.calledAt).getTime()
+            }
+        }
         activeTurn.value = null
         broadcast()
     }
@@ -140,7 +145,12 @@ export const useQueueStore = defineStore('queue', () => {
     function skipTurn() {
         if (!activeTurn.value) return
         const t = turns.value.find(t => t.id === activeTurn.value.id)
-        if (t) t.status = 'skipped'
+        if (t) {
+            t.status = 'skipped'
+            if (t.calledAt && !t.durationMs) {
+                t.durationMs = Date.now() - new Date(t.calledAt).getTime()
+            }
+        }
         activeTurn.value = null
         broadcast()
     }
