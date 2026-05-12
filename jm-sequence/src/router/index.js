@@ -1,16 +1,14 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import KioskView from '../views/KioskView.vue'
-import AgentView from '../views/AgentView.vue'
-import BohView   from '../views/BohView.vue'
-import FohView   from '../views/FohView.vue'
+import Launcher from './Launcher.vue'
+
+const FohView   = () => import('./views/fohView.vue')
+const AgentView = () => import('./views/agentView.vue')
 
 export default createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/',       redirect: '/foh' },
-    { path: '/kiosk',  component: KioskView },
-    { path: '/agent',  component: AgentView },
-    { path: '/boh',    component: BohView   },
-    { path: '/foh',    component: FohView   }, // ← NUEVA RUTA
-  ]
+    { path: '/',       component: Launcher  },
+    { path: '/foh',    component: FohView    },
+    { path: '/agent',  component: AgentView  },
+  ],
 })

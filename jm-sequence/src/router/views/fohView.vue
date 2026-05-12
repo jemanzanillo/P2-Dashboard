@@ -3,7 +3,7 @@
         <header class="foh-container">
             <div class="header-title">
                 <div class="header-logo">
-                    <img class="logo-image" src="/jm-sequence/src/assets/img/DarioContreras-logo-sm.png"
+                    <img class="logo-image" src="@/assets/img/DarioContreras-logo-sm.png"
                         alt="Dario Contreras Logo">
                 </div>
                 <div class="header-text">
