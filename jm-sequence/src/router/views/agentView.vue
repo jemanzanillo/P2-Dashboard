@@ -263,12 +263,20 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Figtree:wght@300;400;500;600&display=swap');
 
+div.foh-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
 header {
+    flex-shrink: 0;
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    padding: 24px clamp(16px, 3vw, 24px);
+    padding: clamp(12px, 2vh, 24px) clamp(16px, 3vw, 24px);
     border-bottom: 2px solid white;
     background-color: #07101E;
     box-sizing: border-box;
@@ -334,17 +342,22 @@ p {
     flex-direction: row;
     align-items: stretch;
     flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .main-screen {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     background-color: #EEF1F6;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: clamp(24px, 3vw, 42px) 0;
-    gap: clamp(16px, 2vw, 32px);
+    justify-content: center;
+    padding: clamp(16px, 3vh, 42px) 0;
+    gap: clamp(10px, 2vh, 32px);
+    overflow: hidden;
 }
 
 .info {
@@ -352,7 +365,7 @@ p {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: clamp(16px, 2.5vw, 40px);
+    gap: clamp(8px, 1.5vh, 24px);
     text-align: center;
     font-size: 24px;
     color: #000;
@@ -388,7 +401,7 @@ p {
 
 .next-btn {
     width: min(480px, 80%);
-    min-height: 200px;
+    min-height: clamp(100px, 18vh, 240px);
     border-radius: 8px;
     background-color: #1057cc;
     display: flex;
@@ -409,7 +422,7 @@ p {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: clamp(16px, 2vw, 32px);
+    gap: clamp(10px, 1.5vh, 32px);
 }
 
 .cta {
@@ -429,7 +442,7 @@ p {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: clamp(12px, 1.5vw, 24px);
+    gap: clamp(6px, 1vh, 24px);
     font-size: clamp(13px, 1.3vw, 16px);
     font-family: 'Figtree', sans-serif;
 }
@@ -477,9 +490,10 @@ p {
 }
 
 .turn {
-    font-size: 96px;
+    font-size: clamp(40px, min(8vw, 9vh), 96px);
     font-family: 'syne';
     color: #949494;
+    line-height: 1;
 }
 
 .summary-divider {
@@ -614,9 +628,9 @@ p {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: clamp(24px, 3vw, 48px) clamp(16px, 2vw, 32px);
+    padding: clamp(16px, 2.5vh, 48px) clamp(16px, 2vw, 32px);
     box-sizing: border-box;
-    gap: clamp(16px, 2vw, 32px);
+    gap: clamp(12px, 2vh, 32px);
     text-align: center;
     color: #eef3ff;
     font-family: 'Figtree', sans-serif;
@@ -633,7 +647,7 @@ p {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: clamp(24px, 2.5vw, 48px);
+    gap: clamp(12px, 2vh, 48px);
     text-align: left;
     color: #20CB8B;
     width: 100%;
@@ -657,7 +671,7 @@ p {
 }
 
 .turns-called-value {
-    font-size: clamp(28px, 3.5vw, 48px);
+    font-size: clamp(24px, min(3.5vw, 5vh), 48px);
     font-family: 'Syne', sans-serif;
     color: #EEF3FF;
     font-weight: 700;
@@ -665,6 +679,7 @@ p {
 
 .history {
     flex: 1;
+    min-height: 0;
     background-color: #0c1828;
     box-sizing: border-box;
     overflow: hidden;
@@ -676,12 +691,13 @@ p {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: clamp(16px, 2vw, 24px) clamp(12px, 1.5vw, 16px);
+    padding: clamp(12px, 1.5vh, 24px) clamp(12px, 1.5vw, 16px);
     box-sizing: border-box;
-    gap: clamp(12px, 1.5vw, 24px);
+    gap: clamp(8px, 1vh, 24px);
     text-align: center;
     color: #eef3ff;
     font-family: 'Figtree', sans-serif;
+    min-height: 0;
 }
 
 .history-title {
@@ -697,6 +713,8 @@ p {
     align-items: stretch;
     gap: 6px;
     width: 100%;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
 }
 
@@ -850,5 +868,145 @@ p {
     font-style: italic;
     text-align: center;
     padding: 8px 0;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+
+/* Intermediate: tighten side panel below 1100px */
+@media (max-width: 1100px) {
+    .side-panel {
+        width: clamp(180px, 22vw, 240px);
+    }
+    .turns-called-value {
+        font-size: clamp(24px, 3vw, 48px);
+    }
+    .insight-title {
+        font-size: clamp(14px, 1.5vw, 20px);
+    }
+}
+
+/* Tablet: stack layout vertically at 768px width */
+@media (max-width: 768px) {
+    .boh-content {
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    .main-screen {
+        flex: none;
+        min-height: 480px;
+        justify-content: flex-start;
+        padding: 24px 0;
+        gap: 16px;
+        overflow: visible;
+    }
+
+    .side-panel {
+        width: 100%;
+        flex-direction: row;
+        flex-shrink: 0;
+        min-height: 0;
+        border-top: 2px solid rgba(238, 243, 255, 0.12);
+    }
+
+    .insights {
+        flex: 1;
+        border-bottom: none;
+        border-right: 2px solid #EEF3FF;
+        padding: 16px;
+    }
+
+    .insights-container {
+        flex-direction: row;
+        justify-content: space-around;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+
+    .data {
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        flex: 1;
+        min-width: 60px;
+        text-align: center;
+    }
+
+    .turns-called-label {
+        text-align: center;
+    }
+
+    .turns-called-value {
+        font-size: clamp(24px, 6vw, 40px);
+    }
+
+    .history {
+        flex: 1.5;
+        min-height: 0;
+        max-height: 220px;
+    }
+
+    .next-btn {
+        width: min(400px, 90%);
+        min-height: clamp(100px, 18vh, 180px);
+    }
+
+    .active-turn {
+        flex-wrap: wrap;
+    }
+}
+
+/* Mobile: aggressively scale at 480px */
+@media (max-width: 480px) {
+    header {
+        padding: 12px 16px;
+    }
+
+    h1 {
+        font-size: 13px;
+        line-height: 1.2;
+    }
+
+    .system-name {
+        font-size: 11px;
+    }
+
+    .logo-image {
+        width: 40px;
+        height: 40px;
+    }
+
+    .side-panel {
+        flex-direction: column;
+    }
+
+    .insights {
+        border-right: none;
+        border-bottom: 2px solid #EEF3FF;
+    }
+
+    .history {
+        max-height: 180px;
+    }
+
+    .next-btn {
+        width: 95%;
+        min-height: 120px;
+    }
+
+    .cta {
+        font-size: 20px;
+    }
+
+    .info-container {
+        flex-direction: column;
+        align-items: flex-start;
+        width: 90%;
+        gap: 12px;
+    }
+
+    .timing-info {
+        gap: 12px;
+    }
 }
 </style>
