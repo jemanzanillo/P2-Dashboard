@@ -172,7 +172,7 @@ export const useQueueStore = defineStore('queue', () => {
     const history = computed(() =>
         turns.value
         .filter(t => t.status !== 'waiting')
-        .slice(-8)
+        .slice()
         .reverse()
     )
 

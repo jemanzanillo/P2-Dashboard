@@ -47,7 +47,7 @@ const counterServices = computed(() => {
     )
 })
 
-const historyItems = computed(() => store.history.slice(0, 7))
+const historyItems = computed(() => store.history)
 
 // ── Duration helper ───────────────────────────────────────────────────────────
 function formatDuration(turn) {
@@ -122,6 +122,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
         <section class="boh-content">
 
             <div class="main-screen">
+                <div class="cta-group">
                 <div class="info">
                     <div class="info-header">
                         <div class="counter-id">COUNTER <strong>{{ store.agentCounterId }}</strong></div>
@@ -159,8 +160,9 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                         <kbd>(Space)</kbd>
                     </div>
                 </div>
+                </div>
 
-                <template class="turn-summary" v-if="store.activeTurn">
+                <div class="turn-summary" v-if="store.activeTurn">
                     <div class="active-turn">
                         <div class="status-title"><span>ACTIVE TURN</span>
                             <span class="boh-priority-badge" v-if="store.activeTurn.priority === 'special'">
@@ -209,7 +211,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                             <kbd class="btn-kbd">(Esc)</kbd>
                         </button>
                     </div>
-                </template>
+                </div>
             </div>
 
             <div class="side-panel">
@@ -268,6 +270,10 @@ div.foh-container {
     flex-direction: column;
     height: 100vh;
     overflow: hidden;
+}
+
+body {
+    margin: 0;
 }
 
 header {
@@ -354,10 +360,19 @@ p {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     padding: clamp(16px, 3vh, 42px) 0;
-    gap: clamp(10px, 2vh, 32px);
+    gap: clamp(16px, 3vh, 48px);
     overflow: hidden;
+}
+
+.cta-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    gap: clamp(12px, 2vh, 24px);
+    flex-shrink: 0;
 }
 
 .info {
@@ -461,13 +476,15 @@ p {
 }
 
 .turn-summary {
-    width: 1000px;
-    outline: 10px solid #949494;
+    width: min(1000px, 90%);
+    border: 10px solid #949494;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1px;
+    justify-content: space-between;
+    gap: 0;
+    padding: 0;
     text-align: left;
     font-size: 32px;
     color: #000;
@@ -478,8 +495,9 @@ p {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0 clamp(16px, 2.5vw, 32px);
+    padding: clamp(8px, 1.5vh, 16px) clamp(16px, 2.5vw, 32px);
     gap: clamp(16px, 2vw, 32px);
+    flex-shrink: 0;
 }
 
 .status-title {
@@ -501,6 +519,7 @@ p {
     height: 2px;
     border-top: 2px solid #949494;
     box-sizing: border-box;
+    flex-shrink: 0;
 }
 
 .info-container {
@@ -508,9 +527,12 @@ p {
     align-items: flex-start;
     justify-content: center;
     flex-wrap: wrap;
-    align-content: flex-start;
-    padding: 0 clamp(16px, 2.5vw, 32px);
-    gap: clamp(16px, 2vw, 32px);
+    align-content: center;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: clamp(8px, 1.5vh, 16px) clamp(16px, 2.5vw, 32px);
+    gap: clamp(10px, 1.5vw, 24px);
     font-size: clamp(16px, 1.6vw, 24px);
 }
 
@@ -562,6 +584,7 @@ p {
     justify-content: center;
     color: #0E3FA3;
     width: 100%;
+    flex-shrink: 0;
 }
 
 .end-turn-button {
@@ -716,6 +739,25 @@ p {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(238, 243, 255, 0.18) transparent;
+}
+
+.entries-container::-webkit-scrollbar {
+    width: 4px;
+}
+
+.entries-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.entries-container::-webkit-scrollbar-thumb {
+    background-color: rgba(238, 243, 255, 0.18);
+    border-radius: 9999px;
+}
+
+.entries-container::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(26, 114, 255, 0.55);
 }
 
 .entry {
@@ -816,6 +858,7 @@ p {
     background: #4B5563;
     box-shadow: 0 8px 32px rgba(16, 38, 185, 0.25);
     cursor: default;
+    min-height: clamp(48px, 8vh, 96px);
 }
 
 .boh-badge--sm {
