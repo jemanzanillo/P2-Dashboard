@@ -1,354 +1,592 @@
 <template>
-    <div class="foh-container">
-        <header class="foh-container">
-            <div class="header-title">
-                <div class="header-logo">
-                    <img class="logo-image" src="@/assets/img/DarioContreras-logo-sm.png"
-                        alt="Dario Contreras Logo">
-                </div>
-                <div class="header-text">
-                    <h1 class="hospital-name">Hospital Docente Universitario Dr. Darío Contreras</h1>
-                    <p class="system-name">JM Sequence - Turns Sequence</p>
-                </div>
-            </div>
-            <div class="header-time time">{{ currentTime || '10:00:08 a.m.'}}</div>
-        </header>
+  <div class="foh-screen">
 
-        <div class="foh-content">
-            <div class="left-column">
-                <!-- Video -->
-                <section class="video">
-                    <div></div>
-                </section>
-                <section class="overview">
-                    <div class="overview-title">Counters</div>
-                    <div class="counter-cards"> //stations-row
-                        <div  class="counter-card">
-                            <div v-for="counter in counters" :key="counter.id" class="counter-container" :class="{ active: counter.active }">
-                                <div class="counter-id">{{ counter.id || 'Counter 1' }}</div>
-                                <div class="counter-turn">{{ counter.currentTurn || 'W888' }}</div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-            </div>
-            <div class="right-column"> 
-                <div class="active-call">
-                    <div class="active-title">Turn call</div>
-                    <div v-if="store.activeTurn" class="active-display"> <!-- active turn -->
-                        <div class="active-turn"> <!-- turn info -->
-                            <div class="active-turn_title">Turn</div> <!-- turn-label -->
-                            <div class="active-turn_id"> {{ store.activeTurn.code || 'W888'}}</div>  
-                        </div>
-                        <div class="arrow"></div>
-                        <div class="active-counter">
-                            <div class="active-counter_title">Counter</div> <!-- station-label -->
-                            <div class="active-counter_content">
-                                <div class="active-counter_id"> {{ store.activeTurn.counterId || '88' }}</div>
-                                <div class="active-service"> {{ store.activeTurn.service || 'Laboratory' }}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="recent-turns">
-                    <div class="recent-title">Last turns</div>
-                    <div class="recent-cards"> <!-- turn-list-->
-                        <div v-for="(turn, index) in displayHistory" :key="turn.id" class="recent-card" :class="getHistoryItemClass(index)">
-                            <div class="recent-call">
-                                <div class="recent-call_status"></div>
-                                <div class="recent-call_id"> {{ turn.code || 'W888' }}</div>
-                            </div>
-                            <div class="recent-counter">
-                                <div class="recent-counter_service"> {{ turn.service || 'Laboratory' }}</div>
-                                <div class="recent-divider">—</div>
-                                <div class="recent-counter_id"> {{ turn.counterId || '88' }}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+    <!-- ── Header ─────────────────────────────────────────────────────── -->
+    <header class="foh-header">
+      <div class="header-brand">
+        <img
+          class="header-logo"
+          src="@/assets/img/DarioContreras-logo-sm.png"
+          alt="Hospital Darío Contreras"
+        />
+        <div class="header-text">
+          <h1 class="hospital-name">Hospital Docente Universitario Dr. Darío Contreras</h1>
+          <p class="header-subtitle">JM Sequence - Turns Sequence</p>
         </div>
-    </div>
-    <!-- Footer ticker -->
+      </div>
+      <time class="header-clock">{{ currentTime }}</time>
+    </header>
+
+    <!-- ── Main ───────────────────────────────────────────────────────── -->
+    <main class="foh-main">
+
+      <!-- Left column -->
+      <div class="left-col">
+
+        <!-- Video zone (placeholder) -->
+        <div class="video-zone"></div>
+
+        <!-- Counters carousel -->
+        <section class="counters-section">
+          <h2 class="section-title">Counters</h2>
+          <div class="counters-row">
+            <div
+              v-for="counter in store.counters"
+              :key="counter.id"
+              class="counter-card"
+            >
+              <span class="counter-label">Station {{ counter.id }}</span>
+              <span class="counter-turn">{{ counter.currentTurnId || '—' }}</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right column -->
+      <div class="right-col">
+
+        <!-- Active turn panel -->
+        <section class="active-section">
+          <h2 class="section-title">Turn call</h2>
+
+          <div v-if="lastCalledTurn" class="active-display">
+            <div class="active-turn-col">
+              <span class="active-label">Turn</span>
+              <span class="active-number">{{ lastCalledTurn.id }}</span>
+              <span class="active-service">{{ lastCalledTurn.serviceLabel }}</span>
+            </div>
+
+            <div class="active-arrow">
+              <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="24" cy="24" r="23" stroke="#1A72FF" stroke-width="2"/>
+                <path d="M18 24H30M30 24L25 19M30 24L25 29" stroke="#1A72FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+
+            <div class="active-station-col">
+              <span class="active-label">Station</span>
+              <span class="active-number">{{ activeCounterId }}</span>
+            </div>
+          </div>
+
+          <div v-else class="active-idle">
+            <span>No active turn</span>
+          </div>
+        </section>
+
+        <!-- History panel -->
+        <section class="history-section">
+          <h2 class="section-title">Last turns</h2>
+          <div class="history-list">
+            <div
+              v-for="turn in displayHistory"
+              :key="turn.id"
+              class="history-item"
+            >
+              <div class="history-left">
+                <span class="history-dot" :class="dotClass(turn.status)"></span>
+                <span class="history-turn-id">{{ turn.id }}</span>
+              </div>
+              <div class="history-center">
+                <span class="history-service">{{ turn.serviceLabel }}</span>
+                <span class="history-arrow">→</span>
+                <span class="history-station">{{ turn.counterId ?? '—' }}</span>
+              </div>
+              <span class="history-badge" :class="badgeClass(turn.status)">
+                {{ statusLabel(turn.status) }}
+              </span>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+    <!-- ── Footer ─────────────────────────────────────────────────────── -->
     <footer class="foh-footer">
-        <div class="ticker-content">
-            <span class="ticker-item">
-                Welcome to Hospital Docente Universitario Dr. Darío Contreras. Please take a ticket and wait for your turn.
-            </span>
-        </div>
+      <div class="footer-badge">JM Sequence</div>
+      <div class="ticker-wrapper">
+        <p class="ticker-text">
+          Welcome to Hospital Docente Universitario Dr. Darío Contreras.
+          Please take a ticket and wait for your turn to be called.
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+          Welcome to Hospital Docente Universitario Dr. Darío Contreras.
+          Please take a ticket and wait for your turn to be called.
+        </p>
+      </div>
     </footer>
+
+  </div>
 </template>
 
+<script setup>
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useQueueStore } from '@/queue'
+
+const store = useQueueStore()
+store.loadFromStorage()
+
+// Persist last called turn so the panel never goes blank between turns
+const lastCalledTurn = ref(store.activeTurn ? { ...store.activeTurn } : null)
+watch(() => store.activeTurn, (newVal) => {
+  if (newVal) lastCalledTurn.value = { ...newVal }
+})
+
+// Live clock
+const currentTime = ref('')
+let clockTimer
+
+function updateClock() {
+  const now = new Date()
+  const h = now.getHours()
+  const m = String(now.getMinutes()).padStart(2, '0')
+  const s = String(now.getSeconds()).padStart(2, '0')
+  const ampm = h >= 12 ? 'pm' : 'am'
+  const h12 = h % 12 || 12
+  currentTime.value = `${h12}:${m}:${s} ${ampm}`
+}
+
+function onStorageChange(e) {
+  if (e.key === 'jm-state') store.loadFromStorage()
+}
+
+onMounted(() => {
+  updateClock()
+  clockTimer = setInterval(updateClock, 1000)
+  window.addEventListener('storage', onStorageChange)
+})
+
+onUnmounted(() => {
+  clearInterval(clockTimer)
+  window.removeEventListener('storage', onStorageChange)
+})
+
+// Last 8 non-waiting turns — includes 'called' so patients can catch up
+const displayHistory = computed(() => store.history.slice(0, 8))
+
+// Use counterId stored on the turn itself — stays valid after the turn is finished
+const activeCounterId = computed(() =>
+  lastCalledTurn.value?.counterId ?? store.agentCounterId
+)
+
+function dotClass(status) {
+  if (status === 'attended') return 'dot--green'
+  if (status === 'skipped')  return 'dot--amber'
+  if (status === 'called')   return 'dot--blue'
+  return 'dot--gray'
+}
+
+function statusLabel(status) {
+  return { attended: 'Attended', skipped: 'No Show', called: 'Called' }[status] || status
+}
+
+function badgeClass(status) {
+  if (status === 'attended') return 'badge--green'
+  if (status === 'skipped')  return 'badge--amber'
+  if (status === 'called')   return 'badge--blue'
+  return 'badge--gray'
+}
+</script>
+
 <style scoped>
-    @import url('https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,300..900;1,300..900&family=Syne:wght@400..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@300..900&family=Syne:wght@400..800&display=swap');
 
-    html {
-        background-color: yellow;
-    }
+/* ── Design tokens ──────────────────────────────────────────────────── */
+:root {
+  --bg-base:         #07101E;
+  --bg-surface:      #0C1828;
+  --bg-elevated:     #112035;
+  --text-primary:    #EEF3FF;
+  --text-secondary:  rgba(238, 243, 255, 0.60);
+  --text-tertiary:   rgba(238, 243, 255, 0.32);
+  --active-green:    #0F9E69;
+  --blue-600:        #1057CC;
+  --brand-blue:      #1A72FF;
+  --border:          rgba(255, 255, 255, 0.12);
+  --border-visible:  rgba(225, 233, 236, 0.60);
+}
 
-    body {
-        width: 1920px;
-        height: 1080px;
-        border: solid 1px green;
-        background-color: #07101E;
-    }
+/* ── Root screen ────────────────────────────────────────────────────── */
+.foh-screen {
+  width: 1920px;
+  height: 1080px;
+  display: grid;
+  grid-template-rows: 152px 1fr 40px;
+  background-color: #07101E;
+  font-family: 'Figtree', sans-serif;
+  color: #EEF3FF;
+  overflow: hidden;
+}
 
-    header {
-        display: flex;
-        box-sizing: border-box;
-        width: 100%;
-        flex-direction: row;
-        padding: 24px;
-        gap: 960px;
-        border-bottom: 2px solid white;
-    }
+/* ── Header ─────────────────────────────────────────────────────────── */
+.foh-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px;
+  background-color: #0C1828;
+  border-bottom: 2px solid rgba(225, 233, 236, 0.60);
+  box-sizing: border-box;
+}
 
-    .header-title {
-        display: flex;
-        flex-direction: row;
-        gap: 32px;
-        width: 716px;
-        color: #EEF3FF;
-    }
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
 
-    h1 {
-        margin: 0;
-        font-family: "Syne";
-        font-weight: bold;
-        font-size: 32px;
-        line-height: 36px;
-        color: #EEF3FF;
-    }
+.header-logo {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
 
-    p {
-        font-family: "Syne";
-        margin: 0;
-        font-size: 24px;
-        color: #EEF3FF;
-    }
+.header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
-    .system-name {
-        color: #EEF3FF;
-        opacity: 60%;
-    }
+.hospital-name {
+  margin: 0;
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 32px;
+  color: #EEF3FF;
+  line-height: 1.1;
+}
 
-    .header-time {
-        font-family: "Figtree";
-        font-weight: 800;
-        font-size: 32px;
-        color: #EEF3FF;
-        opacity: 60%;
-    }
+.header-subtitle {
+  margin: 0;
+  font-family: 'Syne', sans-serif;
+  font-weight: 300;
+  font-size: 24px;
+  color: rgba(238, 243, 255, 0.60);
+}
 
-    .logo-image {
-        width: 96px;
-        height: 96px;
-        background-color: blue;
-    }
+.header-clock {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 800;
+  font-size: 32px;
+  color: rgba(238, 243, 255, 0.60);
+  white-space: nowrap;
+}
 
-    .foh-content {
-        padding: 0;
-        display: flex;
-        flex-direction: row;
-    }
+/* ── Main layout ─────────────────────────────────────────────────────── */
+.foh-main {
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
 
-    .video {
-        width: 1120px;
-        height: 630px;
-        background-color: red;
-        padding: 0 24px;
-        border: 2px solid white;
-        border-top: 0;
-        border-left: 0;
-    }
+/* ── Left column ─────────────────────────────────────────────────────── */
+.left-col {
+  width: 1192px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 2px solid rgba(225, 233, 236, 0.60);
+}
 
-    .overview {
-        padding: 24px;
-        border-right: 2px solid white;
-    }
+/* Video zone placeholder */
+.video-zone {
+  flex: 1;
+  background-color: #07101E;
+  border-bottom: 2px solid rgba(225, 233, 236, 0.60);
+}
 
-    .overview-title {
-        font-family: "Figtree";
-        font-size: 32px;
-        font-weight: bold;
-        color: #0f9e69;
-        margin-bottom: 8px;
-    }
+/* Counters section */
+.counters-section {
+  padding: 16px 24px 24px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
-    .counter-cards {
-        display: flex;
-        flex-direction: row;
-        gap: 28px;
-    }
+.section-title {
+  margin: 0;
+  font-family: 'Figtree', sans-serif;
+  font-weight: 700;
+  font-size: 32px;
+  color: #0F9E69;
+}
 
-    .counter-card {
-        width: 210px;
-        height: 114px;
-        background-color: #112035;
-        padding: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 16px;
-    }
+.counters-row {
+  display: flex;
+  flex-direction: row;
+  gap: 32px;
+  overflow: hidden;
+}
 
-    .counter-id {
-        font-family: "Figtree";
-        font-weight: 400;
-        font-size: 32px;
-        color: #EEF3FF;
-        opacity: 60%;
-    }
+.counter-card {
+  width: 263px;
+  height: 160px;
+  background-color: #112035;
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
 
-    .counter-turn {
-        font-family: "Syne";
-        font-weight: 700;
-        font-size: 64px;
-        color: #EEF3FF;
-    }
+.counter-label {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 400;
+  font-size: 32px;
+  color: rgba(238, 243, 255, 0.60);
+}
 
-    .active-display {
-        display: flex;
-        flex-direction: row;
-        align-items: flex-start;
-        gap: 21px;
-    }
+.counter-turn {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 64px;
+  color: #EEF3FF;
+  line-height: 1;
+}
 
-    .active-turn {
-        display: flex;
-        flex-direction: column;
-    }
+/* ── Right column ────────────────────────────────────────────────────── */
+.right-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
 
-    .active-call {
-        display: flex;
-        flex-direction: column;
-        gap: 40px;
-        padding: 31px;
-        border-bottom: 2px solid white;
-        background-color: #112035;
-    }
+/* Active turn panel */
+.active-section {
+  height: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px 24px 48px;
+  border-bottom: 2px solid rgba(225, 233, 236, 0.60);
+  background-color: #112035;
+  box-sizing: border-box;
+}
 
-    .active-counter {
-        display: flex;
-        flex-direction: column;
-    }
+.active-section .section-title {
+  font-size: 48px;
+  align-self: center;
+}
 
-    .active-counter_content {
-        display: flex;
-        gap: 16px;
-        flex-direction: column;
-    }
+.active-display {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0;
+  width: 100%;
+  justify-content: center;
+}
 
-    .active-title {
-        font: 700 48px "Figtree";
-        color: #0f9e69;
-    }
+.active-turn-col,
+.active-station-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
 
-    .active-turn_title,
-    .active-counter_title {
-        font: 500 32px "Figtree";
-        color: #EEF3FF;
-        opacity: 60%;
-    }
+.active-label {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 500;
+  font-size: 32px;
+  color: rgba(238, 243, 255, 0.32);
+  line-height: 1;
+}
 
-    .active-turn_id,
-    .active-counter_id {
-        font: 700 128px "Syne";
-        margin-top: -16px;
-        color: #EEF3FF;
-    }
+.active-number {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 128px;
+  color: #EEF3FF;
+  line-height: 0.85;
+}
 
-    .active-service {
-        font: 700 32px "Figtree";
-        margin-top: -40px;
-        color: #EEF3FF;
-        opacity: 60%;
-    }
+.active-service {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 700;
+  font-size: 32px;
+  color: rgba(238, 243, 255, 0.60);
+  text-align: left;
+}
 
-    .arrow {
-        width: 48px;
-        height: 48px;
-        background-color: blue;
-        margin: 72px 0;
-        color: #EEF3FF;
-    }
+.active-arrow {
+  align-self: center;
+  margin: 0 24px;
+  flex-shrink: 0;
+}
 
-    .recent-turns {
-        display: flex;
-        flex-direction: column;
-        padding: 24px;
-    }
+.active-idle {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 400;
+  font-size: 32px;
+  color: rgba(238, 243, 255, 0.32);
+  text-align: center;
+}
 
-    .recent-title {
-        font-family: "Figtree";
-        font-size: 32px;
-        font-weight: bold;
-        color: #0f9e69;
-        margin-bottom: 8px;
-    }
+/* History panel */
+.history-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  gap: 32px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
 
-    .recent-cards {
-        display: flex;
-        flex-direction: column;
-        gap: 24px;
-    }
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
 
-    .recent-card {
-        display: flex;
-        flex-direction: row;
-        gap: 128px;
-        background-color: #112035;
-        padding: 24px;
-        border-radius: 12px;
-    }
+.history-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  background-color: #112035;
+  border-radius: 8px;
+  padding: 16px 24px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
 
-    .recent-call {
-        display: inline-flex;
-        gap: 32px;
-        align-items: center;
-    }
+.history-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-shrink: 0;
+}
 
-    .recent-call_status {
-        width: 32px;
-        height: 32px;
-        background-color: green;
-    }
+.history-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
 
-    .recent-call_id {
-        font-family: "Figtree";
-        font-size: 32px;
-        font-weight: 500;
-        color: #EEF3FF;
-    }
+.dot--green { background-color: #0F9E69; }
+.dot--amber { background-color: #F0A429; }
+.dot--blue  { background-color: #1A72FF; }
+.dot--gray  { background-color: rgba(238, 243, 255, 0.20); }
 
-    .recent-counter {
-        display: inline-flex;
-        gap: 24px;
-        font-family: "Figtree";
-        font-size: 32px;
-        color: #EEF3FF;
-        font-weight: regular;
-        opacity: 60%;
-    }
+.history-turn-id {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 600;
+  font-size: 28px;
+  color: #EEF3FF;
+  white-space: nowrap;
+}
 
-    .foh-footer {
-        height: 40px;
-        background: var(--foh-blue-600, #1057CC);
-        border-top: #EEF3FF;
-        overflow: hidden;
-        display: flex;
-        align-items: center;
-    }
+.history-center {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  font-family: 'Figtree', sans-serif;
+  font-weight: 400;
+  font-size: 24px;
+  color: rgba(238, 243, 255, 0.60);
+  white-space: nowrap;
+}
 
-    .ticker-content {
-        animation: ticker-scroll 30s linear infinite;
-        white-space: nowrap;
-        padding: 0 48px;
-    }
+.history-arrow {
+  color: #1A72FF;
+  font-size: 20px;
+}
 
-    .ticker-item {
-        font-size: 24px;
-        color: #EEF3FF;
-        font-weight: 400;
-    }
+.history-station {
+  font-weight: 600;
+  color: rgba(238, 243, 255, 0.80);
+}
+
+.history-badge {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 700;
+  font-size: 20px;
+  padding: 4px 16px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.badge--green {
+  background-color: rgba(15, 158, 105, 0.20);
+  color: #0F9E69;
+}
+
+.badge--amber {
+  background-color: rgba(240, 164, 41, 0.20);
+  color: #F0A429;
+}
+
+.badge--blue {
+  background-color: rgba(26, 114, 255, 0.20);
+  color: #4D93FF;
+}
+
+.badge--gray {
+  background-color: rgba(238, 243, 255, 0.10);
+  color: rgba(238, 243, 255, 0.50);
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+.foh-footer {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 40px;
+  overflow: hidden;
+}
+
+.footer-badge {
+  flex-shrink: 0;
+  width: 287px;
+  height: 40px;
+  background-color: #EEF1F6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Figtree', sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+  color: #1A72FF;
+  white-space: nowrap;
+}
+
+.ticker-wrapper {
+  flex: 1;
+  height: 40px;
+  background-color: #1057CC;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.ticker-text {
+  margin: 0;
+  padding: 0 48px;
+  font-family: 'Figtree', sans-serif;
+  font-weight: 400;
+  font-size: 24px;
+  color: #EEF3FF;
+  white-space: nowrap;
+  animation: ticker-scroll 40s linear infinite;
+  will-change: transform;
+}
+
+@keyframes ticker-scroll {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(-100%); }
+}
 </style>

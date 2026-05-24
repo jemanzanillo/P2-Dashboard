@@ -115,8 +115,9 @@ export const useQueueStore = defineStore('queue', () => {
         if (prev && prev.status === 'called') prev.status = 'attended'
         }
     
-        next.status   = 'called'
-        next.calledAt = new Date().toISOString()
+        next.status    = 'called'
+        next.calledAt  = new Date().toISOString()
+        next.counterId = agentCounterId.value
         activeTurn.value = { ...next }
     
         // Update counter display
