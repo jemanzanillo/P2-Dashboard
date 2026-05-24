@@ -6,9 +6,12 @@ const store = useQueueStore()
 
 // ── Clock ─────────────────────────────────────────────────────────────────────
 const currentTime = ref('')
+// Reactive timestamp — used for elapsed display AND cooldown countdown
+const nowMs = ref(Date.now())
+
 function updateClock() {
-    const now = new Date()
-    currentTime.value = now.toLocaleTimeString('es-DO', {
+    const d = new Date()
+    currentTime.value = d.toLocaleTimeString('es-DO', {
         hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
     })
 }
@@ -17,6 +20,7 @@ let elapsedTimer
 const elapsedDisplay = ref('0 min 0 seg')
 
 function updateElapsed() {
+    nowMs.value = Date.now()  // drives cooldown computeds too
     if (!store.activeTurn?.calledAt) { elapsedDisplay.value = '—'; return }
     const diff = Math.floor((Date.now() - new Date(store.activeTurn.calledAt)) / 1000)
     const m = Math.floor(diff / 60)
@@ -27,13 +31,83 @@ function updateElapsed() {
 onMounted(() => {
     store.loadFromStorage()
     updateClock()
-    clockTimer = setInterval(updateClock, 1000)
+    clockTimer  = setInterval(updateClock, 1000)
     elapsedTimer = setInterval(updateElapsed, 1000)
 })
 onUnmounted(() => {
     clearInterval(clockTimer)
     clearInterval(elapsedTimer)
 })
+
+// ── 3-Call Protocol ───────────────────────────────────────────────────────────
+const COOLDOWN_SECS = 30
+
+const callCount = computed(() => store.activeTurn?.callCount ?? 0)
+const lastCalledAt = computed(() => store.activeTurn?.lastCalledAt ?? null)
+
+const cooldownRemaining = computed(() => {
+    if (!lastCalledAt.value || callCount.value >= 3) return 0
+    const elapsed = (nowMs.value - new Date(lastCalledAt.value).getTime()) / 1000
+    return Math.max(0, Math.ceil(COOLDOWN_SECS - elapsed))
+})
+
+const isInCooldown = computed(() => cooldownRemaining.value > 0)
+
+// SVG ring: circumference = 2π × r(54) ≈ 339.3
+// offset 0 = full ring (cooldown just started), 339.3 = empty (cooldown done)
+const RING_CIRCUMFERENCE = 339.3
+const ringOffset = computed(() =>
+    RING_CIRCUMFERENCE * (1 - cooldownRemaining.value / COOLDOWN_SECS)
+)
+
+const ctaLabel = computed(() => {
+    if (!store.activeTurn) return 'CALL NEXT'
+    if (callCount.value === 1) return 'CALL AGAIN'
+    if (callCount.value === 2) return 'LAST CALL'
+    return 'MARK NO SHOW'
+})
+
+// CTA is disabled while cooldown is running (calls 1 and 2 only)
+const ctaDisabled = computed(() => {
+    if (!store.activeTurn) return !store.nextTurn
+    if (callCount.value >= 3) return false
+    return isInCooldown.value
+})
+
+// At call-3, the button becomes destructive (amber)
+const ctaIsDestructive = computed(() => callCount.value >= 3)
+
+// Last call timestamp formatted for the call indicator
+const lastCallTime = computed(() => {
+    if (!lastCalledAt.value) return ''
+    return new Date(lastCalledAt.value).toLocaleTimeString('es-DO', {
+        hour: '2-digit', minute: '2-digit'
+    })
+})
+
+// ── Confirmation dialog (Esc → no-show override) ──────────────────────────────
+const showNoShowConfirm = ref(false)
+
+function confirmNoShow() {
+    store.markNoShow(true)
+    showNoShowConfirm.value = false
+}
+
+function handleCtaClick() {
+    if (ctaDisabled.value) return
+    if (!store.activeTurn) { store.callNext(); return }
+    if (callCount.value < 3) { store.recallTurn(); return }
+    store.markNoShow()
+}
+
+// Defer the next-in-queue turn: call it briefly then suspend to back of queue.
+// Used for kiosk errors or wrong-number situations before the turn is made active.
+function deferNextTurn() {
+    if (!store.nextTurn) return
+    // Temporarily activate the turn so suspendTurn() has an activeTurn to work with
+    store.callNext()
+    store.suspendTurn()
+}
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 const agentCounter = computed(() =>
@@ -94,10 +168,24 @@ function statusDotMod(status) {
 
 
 // Keyboard shortcuts
+// Space  → call protocol progression (1st, 2nd, 3rd call) — never triggers no-show
+// Enter  → finish turn (always, any call state)
+// Esc    → no-show path exclusively (shows confirmation dialog if < 3 calls)
 function handleKey(e) {
-    if (e.code === 'Space' && !store.activeTurn) { e.preventDefault(); store.callNext() }
+    if (showNoShowConfirm.value) {
+        if (e.code === 'Escape') { e.preventDefault(); showNoShowConfirm.value = false }
+        if (e.code === 'Enter')  { e.preventDefault(); confirmNoShow() }
+        return
+    }
+    if (e.code === 'Space') {
+        e.preventDefault()
+        if (!store.activeTurn) { store.callNext(); return }
+        if (ctaDisabled.value) return          // blocked during cooldown
+        if (callCount.value < 3) store.recallTurn()
+        // callCount === 3: Space does nothing — Esc is the only path to no-show
+    }
     if (e.code === 'Enter' && store.activeTurn) { e.preventDefault(); store.finishTurn() }
-    if (e.code === 'Escape' && store.activeTurn) { e.preventDefault(); store.skipTurn() }
+    if (e.code === 'Escape' && store.activeTurn) { e.preventDefault(); showNoShowConfirm.value = true }
 }
 onMounted(() => window.addEventListener('keydown', handleKey))
 onUnmounted(() => window.removeEventListener('keydown', handleKey))
@@ -133,14 +221,37 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                     </div>
                     <time class="time">{{ currentTime }}</time>
                 </div>
-                <div class="next-btn" :class="{ 'boh-call-btn--disabled': !!store.activeTurn }" role="button"
-                    tabindex="0" :aria-disabled="!!store.activeTurn" @click="!store.activeTurn && store.callNext()"
-                    @keydown.enter="!store.activeTurn && store.callNext()">
+                <div
+                    class="next-btn"
+                    :class="{
+                        'next-btn--disabled':    ctaDisabled,
+                        'next-btn--destructive': ctaIsDestructive,
+                        'next-btn--cooldown':    isInCooldown
+                    }"
+                    role="button"
+                    tabindex="0"
+                    :aria-disabled="ctaDisabled"
+                    :aria-label="ctaLabel"
+                    @click="handleCtaClick"
+                    @keydown.space.prevent="handleCtaClick"
+                >
+                    <!-- Countdown ring — visible only during 30s cooldown -->
+                    <svg v-if="isInCooldown" class="countdown-ring" viewBox="0 0 120 120" aria-hidden="true">
+                        <circle class="ring-track"    cx="60" cy="60" r="54" />
+                        <circle class="ring-progress" cx="60" cy="60" r="54"
+                            :style="{ strokeDashoffset: ringOffset }" />
+                    </svg>
+
                     <div class="next-btn_container">
-                        <span class="cta">
-                            {{ store.activeTurn ? 'IN PROGRESS' : 'CALL NEXT' }}
+                        <span class="cta">{{ ctaLabel }}</span>
+
+                        <!-- Cooldown sub-label: countdown seconds (Syne monospaced) -->
+                        <span v-if="isInCooldown" class="cta-countdown">
+                            Available in {{ cooldownRemaining }}s
                         </span>
-                        <div class="status-container">
+
+                        <!-- Normal sub-info: queue stats + next turn preview (idle state) -->
+                        <div v-else-if="!store.activeTurn" class="status-container">
                             <div class="status">
                                 <span class="btn_waiting">
                                     {{ store.stats.waiting }} turn{{ store.stats.waiting !== 1 ? 's' : '' }} waiting
@@ -149,16 +260,32 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                             <div class="next-details" v-if="store.nextTurn">
                                 <span class="next-label">NEXT:</span>
                                 <span class="next-info">
-                                    {{ store.nextTurn.id }} || {{ store.nextTurn.serviceLabel }}
+                                    {{ store.nextTurn.id }} · {{ store.nextTurn.serviceLabel }}
                                     <span v-if="store.nextTurn?.priority === 'special'" class="boh-priority-tag">
                                         ★ Special</span>
                                 </span>
                             </div>
                         </div>
                     </div>
-                    <div class="btn-kbd" v-if="!store.activeTurn">
-                        <kbd>(Space)</kbd>
-                    </div>
+
+                    <kbd class="btn-kbd" v-if="!store.activeTurn">(Space)</kbd>
+                    <kbd class="btn-kbd" v-else-if="!isInCooldown && callCount < 3">(Space)</kbd>
+                </div>
+
+                <!-- Call indicator: "Call 2 of 3 · 10:14 AM" -->
+                <p v-if="store.activeTurn" class="call-indicator">
+                    Call {{ callCount }} of 3
+                    <span v-if="lastCallTime" class="call-time"> · {{ lastCallTime }}</span>
+                </p>
+
+                <!-- Cancel / Defer next turn (before it becomes active) -->
+                <div v-if="!store.activeTurn && store.nextTurn" class="next-turn-mgmt">
+                    <button class="btn-ghost-sm" @click="deferNextTurn" title="Defer to back of queue">
+                        Defer
+                    </button>
+                    <button class="btn-ghost-sm btn-ghost-sm--danger" @click="store.cancelTurn(store.nextTurn.id)" title="Cancel erroneous turn">
+                        Cancel turn
+                    </button>
                 </div>
                 </div>
 
@@ -207,8 +334,10 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                         <button class="end-turn-button" @click="store.finishTurn()">End turn
                             <kbd class="btn-kbd">(Enter)</kbd>
                         </button>
-                        <button class="mark-no-show-button" @click="store.skipTurn()">Set as No Show
-                            <kbd class="btn-kbd">(Esc)</kbd>
+                        <!-- No-show is now reached via Esc or the CTA progression;
+                             this button remains as a visible Esc-equivalent for mouse users -->
+                        <button class="mark-no-show-button" @click="showNoShowConfirm = true">
+                            No Show <kbd class="btn-kbd">(Esc)</kbd>
                         </button>
                     </div>
                 </div>
@@ -253,6 +382,14 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                                 <span class="boh-badge entry_badge" :class="statusBadgeMod(turn.status)">
                                     {{ statusLabel(turn.status) }}
                                 </span>
+
+                                <!-- Reinstate: patient arrived after no-show -->
+                                <button
+                                    v-if="turn.status === 'skipped'"
+                                    class="btn-reinstate"
+                                    @click.stop="store.reinstateFromHistory(turn.id)"
+                                    title="Patient arrived — put back in queue"
+                                >↩</button>
                             </div>
                         </div>
                     </div>
@@ -260,6 +397,33 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
             </div>
         </section>
     </div>
+
+    <!-- ── No-Show Confirmation Dialog ────────────────────────────────────── -->
+    <Teleport to="body">
+        <div v-if="showNoShowConfirm" class="confirm-overlay" @click.self="showNoShowConfirm = false">
+            <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+                <p class="confirm-title" id="confirm-title">Mark as No Show?</p>
+                <p class="confirm-body">
+                    <span v-if="callCount < 3">
+                        Protocol not complete ({{ callCount }} of 3 calls made).
+                    </span>
+                    <span v-else>
+                        3 calls completed.
+                    </span>
+                    This will be recorded in the audit log.
+                </p>
+                <div class="confirm-actions">
+                    <button class="btn-confirm-danger" @click="confirmNoShow">
+                        Confirm No Show
+                    </button>
+                    <button class="btn-confirm-cancel" @click="showNoShowConfirm = false">
+                        Cancel
+                    </button>
+                </div>
+                <p class="confirm-hint">Enter to confirm · Esc to cancel</p>
+            </div>
+        </div>
+    </Teleport>
 </template>
 
 <style scoped>
@@ -997,6 +1161,203 @@ p {
     .active-turn {
         flex-wrap: wrap;
     }
+}
+
+/* ── 3-Call Protocol ────────────────────────────────────────────────────── */
+
+/* Destructive state (call-3 → Mark No Show) */
+.next-btn--destructive {
+    background-color: #F0A429 !important;
+    color: #111827 !important;
+}
+.next-btn--destructive:hover {
+    background-color: #D4901F !important;
+}
+.next-btn--destructive .ring-progress {
+    stroke: #92400E;
+}
+
+/* Cooldown disabled state */
+.next-btn--disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* SVG countdown ring — positioned absolutely over/around the button */
+.next-btn {
+    position: relative;
+}
+.countdown-ring {
+    position: absolute;
+    inset: -10px;
+    width: calc(100% + 20px);
+    height: calc(100% + 20px);
+    pointer-events: none;
+    border-radius: inherit;
+}
+.ring-track {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.15);
+    stroke-width: 5;
+}
+.ring-progress {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.7);
+    stroke-width: 5;
+    stroke-dasharray: 339.3;
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: center;
+    transition: stroke-dashoffset 1s linear;
+}
+
+/* Countdown seconds label inside the CTA */
+.cta-countdown {
+    display: block;
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(13px, 1.3vw, 16px);
+    font-weight: 500;
+    opacity: 0.75;
+    margin-top: 4px;
+}
+
+/* Call indicator: "Call 2 of 3 · 10:14 AM" */
+.call-indicator {
+    font-family: 'Figtree', sans-serif;
+    font-size: clamp(12px, 1.1vw, 14px);
+    color: rgba(17, 24, 39, 0.5);
+    margin: 0;
+    text-align: center;
+}
+.call-time {
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+}
+
+/* Defer / Cancel next-turn management */
+.next-turn-mgmt {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-top: -4px;
+}
+.btn-ghost-sm {
+    font-family: 'Figtree', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: #6B7280;
+    background: transparent;
+    border: 1px solid rgba(107, 114, 128, 0.3);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s;
+}
+.btn-ghost-sm:hover {
+    background-color: rgba(107, 114, 128, 0.08);
+    color: #374151;
+}
+.btn-ghost-sm--danger {
+    color: #B45309;
+    border-color: rgba(180, 83, 9, 0.3);
+}
+.btn-ghost-sm--danger:hover {
+    background-color: rgba(180, 83, 9, 0.06);
+    color: #92400E;
+}
+
+/* Reinstate button in history (↩) */
+.btn-reinstate {
+    flex-shrink: 0;
+    background: rgba(26, 114, 255, 0.12);
+    color: #1A72FF;
+    border: none;
+    border-radius: 4px;
+    width: 22px;
+    height: 22px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background-color 0.15s;
+    line-height: 1;
+}
+.btn-reinstate:hover {
+    background: rgba(26, 114, 255, 0.22);
+}
+
+/* ── No-Show Confirmation Dialog ────────────────────────────────────────── */
+.confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    backdrop-filter: blur(2px);
+}
+.confirm-dialog {
+    background: #fff;
+    border-radius: 12px;
+    padding: 32px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
+    text-align: center;
+}
+.confirm-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: #111827;
+    margin: 0 0 12px;
+}
+.confirm-body {
+    font-family: 'Figtree', sans-serif;
+    font-size: 14px;
+    color: #4B5563;
+    margin: 0 0 24px;
+    line-height: 1.5;
+}
+.confirm-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+.btn-confirm-danger {
+    font-family: 'Figtree', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    background: #F0A429;
+    color: #111827;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+.btn-confirm-danger:hover { background: #D4901F; }
+.btn-confirm-cancel {
+    font-family: 'Figtree', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    background: transparent;
+    color: #6B7280;
+    border: 1px solid rgba(107, 114, 128, 0.35);
+    border-radius: 8px;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+.btn-confirm-cancel:hover { background: rgba(107, 114, 128, 0.06); }
+.confirm-hint {
+    font-family: 'Figtree', sans-serif;
+    font-size: 11px;
+    color: #9CA3AF;
+    margin: 16px 0 0;
 }
 
 /* Mobile: aggressively scale at 480px */

@@ -1,4 +1,6 @@
-import { defineStore } from 'pinia'
+import { define
+    
+ } from 'pinia'
 import { ref, computed } from 'vue'
 
 const SERVICES = [
@@ -13,7 +15,7 @@ const SERVICES = [
 ]
 
 // 20 pre-generated turns ready for the agent/FOH demo.
-// Status: 'waiting' | 'called' | 'attended' | 'skipped'
+// Status: 'waiting' | 'called' | 'attended' | 'skipped' | 'deferred'
 // Priority: 'normal' | 'special'
 // Special Condition: 'Normal' | 'Pregnancy' | 'Elderly Age (65+)' | 'Disability'
 const DEMO_TURNS = [
@@ -115,10 +117,14 @@ export const useQueueStore = defineStore('queue', () => {
         if (prev && prev.status === 'called') prev.status = 'attended'
         }
     
-        next.status    = 'called'
-        next.calledAt  = new Date().toISOString()
-        next.counterId = agentCounterId.value
-        activeTurn.value = { ...next }
+        next.status       = 'called'
+        next.calledAt     = new Date().toISOString()
+        next.counterId    = agentCounterId.value
+        // 3-Call Protocol fields
+        next.callCount    = 1
+        next.lastCalledAt = next.calledAt
+        next.callLog      = [{ callNumber: 1, timestamp: next.calledAt }]
+        activeTurn.value  = { ...next }
     
         // Update counter display
         const counter = counters.value.find(c => c.id === agentCounterId.value)
@@ -142,12 +148,32 @@ export const useQueueStore = defineStore('queue', () => {
         broadcast()
     }
     
-    /** Mark the active turn as skipped (no-show) and clear it */
-    function skipTurn() {
+    /**
+     * Re-call the active turn (2nd or 3rd call in the 3-Call Protocol).
+     * Increments callCount and appends an entry to callLog for audit.
+     */
+    function recallTurn() {
+        if (!activeTurn.value) return
+        const t = turns.value.find(t => t.id === activeTurn.value.id)
+        if (!t) return
+        t.callCount    = (t.callCount || 1) + 1
+        t.lastCalledAt = new Date().toISOString()
+        t.callLog      = [...(t.callLog || []), { callNumber: t.callCount, timestamp: t.lastCalledAt }]
+        activeTurn.value = { ...t }
+        broadcast()
+    }
+
+    /**
+     * Mark the active turn as no-show and clear it.
+     * @param {boolean} override - true when agent skips the full protocol (Esc shortcut).
+     *   Logged as noShowOverride for audit / legal reference.
+     */
+    function markNoShow(override = false) {
         if (!activeTurn.value) return
         const t = turns.value.find(t => t.id === activeTurn.value.id)
         if (t) {
-            t.status = 'skipped'
+            t.status          = 'skipped'
+            t.noShowOverride  = override
             if (t.calledAt && !t.durationMs) {
                 t.durationMs = Date.now() - new Date(t.calledAt).getTime()
             }
@@ -156,11 +182,63 @@ export const useQueueStore = defineStore('queue', () => {
         broadcast()
     }
 
+    /**
+     * Re-queue a skipped (no-show) turn from history.
+     * Patient data is preserved; gets a fresh createdAt so it lands at the back of FIFO queue.
+     */
+    function reinstateFromHistory(turnId) {
+        const t = turns.value.find(t => t.id === turnId)
+        if (!t) return
+        t.status      = 'waiting'
+        t.createdAt   = new Date().toISOString()
+        t.calledAt    = null
+        t.callCount   = 0
+        t.callLog     = []
+        t.lastCalledAt = null
+        t.durationMs  = null
+        t.noShowOverride = false
+        broadcast()
+    }
+
+    /**
+     * Defer the active turn back to the queue (wrong number, patient unresponsive but agent
+     * wants to continue queue). Moves to back of FIFO.
+     */
+    function suspendTurn() {
+        if (!activeTurn.value) return
+        const t = turns.value.find(t => t.id === activeTurn.value.id)
+        if (t) {
+            t.status    = 'deferred'
+            t.createdAt = new Date().toISOString()
+        }
+        activeTurn.value = null
+        broadcast()
+    }
+
+    /**
+     * Hard-cancel a turn that has not yet been made active (e.g. kiosk error).
+     * Removes it entirely from the turns array.
+     */
+    function cancelTurn(turnId) {
+        turns.value = turns.value.filter(t => t.id !== turnId)
+        broadcast()
+    }
+
+    /** Reset all state back to the original 20 demo turns. */
+    function resetDemo() {
+        turns.value      = DEMO_TURNS.map(t => ({ ...t }))
+        activeTurn.value = null
+        counters.value   = DEMO_COUNTERS.map(c => ({ ...c, currentTurnId: null }))
+        try { localStorage.removeItem('jm-state') } catch {}
+        broadcast()
+    }
+
     // ── Getters ───────────────────────────────────────────────────────────────
     
     const waitingTurns = computed(() =>
         turns.value
-        .filter(t => t.status === 'waiting')
+        // 'deferred' turns re-enter the queue at back-of-FIFO (fresh createdAt)
+        .filter(t => t.status === 'waiting' || t.status === 'deferred')
         .sort((a, b) => {
             if (a.priority === 'special' && b.priority !== 'special') return -1
             if (b.priority === 'special' && a.priority !== 'special') return 1
@@ -192,9 +270,14 @@ export const useQueueStore = defineStore('queue', () => {
         agentCounterId,
         // actions
         callNext,
+        recallTurn,
         finishTurn,
-        skipTurn,
+        markNoShow,
+        reinstateFromHistory,
+        suspendTurn,
+        cancelTurn,
         loadFromStorage,
+        resetDemo,
         // getters
         waitingTurns,
         nextTurn,
