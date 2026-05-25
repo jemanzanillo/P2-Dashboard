@@ -46,7 +46,8 @@ const callCount = computed(() => store.activeTurn?.callCount ?? 0)
 const lastCalledAt = computed(() => store.activeTurn?.lastCalledAt ?? null)
 
 const cooldownRemaining = computed(() => {
-    if (!lastCalledAt.value || callCount.value >= 3) return 0
+    if (!lastCalledAt.value) return 0
+    // Cooldown applies after every call — including the 3rd — giving patients wiggle room
     const elapsed = (nowMs.value - new Date(lastCalledAt.value).getTime()) / 1000
     return Math.max(0, Math.ceil(COOLDOWN_SECS - elapsed))
 })
@@ -64,18 +65,19 @@ const ctaLabel = computed(() => {
     if (!store.activeTurn) return 'CALL NEXT'
     if (callCount.value === 1) return 'CALL AGAIN'
     if (callCount.value === 2) return 'LAST CALL'
+    // call-3: show 'LAST CALL' during its cooldown, then reveal 'MARK NO SHOW'
+    if (isInCooldown.value) return 'LAST CALL'
     return 'MARK NO SHOW'
 })
 
-// CTA is disabled while cooldown is running (calls 1 and 2 only)
+// CTA is disabled while any cooldown is running (all 3 calls, including post-3rd)
 const ctaDisabled = computed(() => {
     if (!store.activeTurn) return !store.nextTurn
-    if (callCount.value >= 3) return false
     return isInCooldown.value
 })
 
-// At call-3, the button becomes destructive (amber)
-const ctaIsDestructive = computed(() => callCount.value >= 3)
+// Destructive amber state: only after the 3rd call cooldown has fully expired
+const ctaIsDestructive = computed(() => callCount.value >= 3 && !isInCooldown.value)
 
 // Last call timestamp formatted for the call indicator
 const lastCallTime = computed(() => {
@@ -98,15 +100,6 @@ function handleCtaClick() {
     if (!store.activeTurn) { store.callNext(); return }
     if (callCount.value < 3) { store.recallTurn(); return }
     store.markNoShow()
-}
-
-// Defer the next-in-queue turn: call it briefly then suspend to back of queue.
-// Used for kiosk errors or wrong-number situations before the turn is made active.
-function deferNextTurn() {
-    if (!store.nextTurn) return
-    // Temporarily activate the turn so suspendTurn() has an activeTurn to work with
-    store.callNext()
-    store.suspendTurn()
 }
 
 // ── Computed ──────────────────────────────────────────────────────────────────
@@ -278,15 +271,6 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                     <span v-if="lastCallTime" class="call-time"> · {{ lastCallTime }}</span>
                 </p>
 
-                <!-- Cancel / Defer next turn (before it becomes active) -->
-                <div v-if="!store.activeTurn && store.nextTurn" class="next-turn-mgmt">
-                    <button class="btn-ghost-sm" @click="deferNextTurn" title="Defer to back of queue">
-                        Defer
-                    </button>
-                    <button class="btn-ghost-sm btn-ghost-sm--danger" @click="store.cancelTurn(store.nextTurn.id)" title="Cancel erroneous turn">
-                        Cancel turn
-                    </button>
-                </div>
                 </div>
 
                 <div class="turn-summary" v-if="store.activeTurn">
@@ -338,6 +322,16 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                              this button remains as a visible Esc-equivalent for mouse users -->
                         <button class="mark-no-show-button" @click="showNoShowConfirm = true">
                             No Show <kbd class="btn-kbd">(Esc)</kbd>
+                        </button>
+                    </div>
+
+                    <!-- Exceptional actions — only available once a turn is active -->
+                    <div class="exceptional-actions">
+                        <button class="btn-ghost-sm" @click="store.suspendTurn()" title="Send patient back to queue (e.g. wrong number, needs to wait)">
+                            Defer turn
+                        </button>
+                        <button class="btn-ghost-sm btn-ghost-sm--danger" @click="store.cancelTurn(store.activeTurn.id)" title="Remove turn entirely (kiosk error, duplicate)">
+                            Cancel turn
                         </button>
                     </div>
                 </div>
@@ -801,6 +795,44 @@ p {
     background-color: rgba(75, 85, 99, 0.08);
 }
 
+.exceptional-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    padding: 8px 12px 12px;
+    width: 100%;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.btn-ghost-sm {
+    font-family: 'Figtree', sans-serif;
+    font-size: clamp(11px, 1.1vw, 13px);
+    font-weight: 500;
+    color: #6B7280;
+    background: transparent;
+    border: 1px solid rgba(107, 114, 128, 0.3);
+    border-radius: 6px;
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s;
+}
+
+.btn-ghost-sm:hover {
+    background-color: rgba(107, 114, 128, 0.08);
+    color: #374151;
+}
+
+.btn-ghost-sm--danger {
+    color: #B45309;
+    border-color: rgba(180, 83, 9, 0.3);
+}
+
+.btn-ghost-sm--danger:hover {
+    background-color: rgba(180, 83, 9, 0.06);
+    color: #92400E;
+}
+
 .side-panel {
     width: clamp(220px, 20vw, 280px);
     flex-shrink: 0;
@@ -1234,37 +1266,6 @@ p {
     font-weight: 600;
 }
 
-/* Defer / Cancel next-turn management */
-.next-turn-mgmt {
-    display: flex;
-    gap: 8px;
-    justify-content: center;
-    margin-top: -4px;
-}
-.btn-ghost-sm {
-    font-family: 'Figtree', sans-serif;
-    font-size: 12px;
-    font-weight: 500;
-    color: #6B7280;
-    background: transparent;
-    border: 1px solid rgba(107, 114, 128, 0.3);
-    border-radius: 6px;
-    padding: 4px 10px;
-    cursor: pointer;
-    transition: background-color 0.15s, color 0.15s;
-}
-.btn-ghost-sm:hover {
-    background-color: rgba(107, 114, 128, 0.08);
-    color: #374151;
-}
-.btn-ghost-sm--danger {
-    color: #B45309;
-    border-color: rgba(180, 83, 9, 0.3);
-}
-.btn-ghost-sm--danger:hover {
-    background-color: rgba(180, 83, 9, 0.06);
-    color: #92400E;
-}
 
 /* Reinstate button in history (↩) */
 .btn-reinstate {

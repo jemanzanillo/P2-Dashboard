@@ -1,6 +1,18 @@
 <template>
   <div class="foh-screen">
 
+    <!-- ── Audio activation overlay ──────────────────────────────────── -->
+    <div v-if="!audioReady" class="audio-overlay" @click="requestAudioPermission">
+      <div class="audio-overlay-inner">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M24 8L14 18H6v12h8l10 10V8z" fill="#EEF3FF" fill-opacity="0.9"/>
+          <path d="M32 16c2.67 2.67 4 5.83 4 9s-1.33 6.33-4 9" stroke="#1A72FF" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M37 11c4 4 6 8.67 6 13s-2 9-6 13" stroke="#1A72FF" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.5"/>
+        </svg>
+        <p class="audio-overlay-text">Toque la pantalla para activar el audio</p>
+      </div>
+    </div>
+
     <!-- ── Header ─────────────────────────────────────────────────────── -->
     <header class="foh-header">
       <div class="header-brand">
@@ -120,16 +132,25 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useQueueStore } from '@/queue'
+import { useTurnAnnouncer } from '@/composables/useTurnAnnouncer'
 
 const store = useQueueStore()
-store.loadFromStorage()
+const { announce, audioReady, requestAudioPermission } = useTurnAnnouncer()
+
+// Guard: skip announcing the turn that was already active when the page loads
+const mountComplete = ref(false)
 
 // Persist last called turn so the panel never goes blank between turns
 const lastCalledTurn = ref(store.activeTurn ? { ...store.activeTurn } : null)
 watch(() => store.activeTurn, (newVal) => {
-  if (newVal) lastCalledTurn.value = { ...newVal }
+  if (newVal) {
+    lastCalledTurn.value = { ...newVal }
+    if (mountComplete.value) {
+      announce(newVal, (newVal.callCount ?? 1) > 1)
+    }
+  }
 })
 
 // Live clock
@@ -150,7 +171,12 @@ function onStorageChange(e) {
   if (e.key === 'jm-state') store.loadFromStorage()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  store.loadFromStorage()
+  // Wait for Vue to flush the pending watch callbacks triggered by loadFromStorage()
+  // before enabling announcements — prevents announcing a turn that was already active.
+  await nextTick()
+  mountComplete.value = true
   updateClock()
   clockTimer = setInterval(updateClock, 1000)
   window.addEventListener('storage', onStorageChange)
@@ -208,6 +234,7 @@ function badgeClass(status) {
 
 /* ── Root screen ────────────────────────────────────────────────────── */
 .foh-screen {
+  position: relative;
   width: 1920px;
   height: 1080px;
   display: grid;
@@ -588,5 +615,34 @@ function badgeClass(status) {
 @keyframes ticker-scroll {
   from { transform: translateX(100%); }
   to   { transform: translateX(-100%); }
+}
+
+/* ── Audio activation overlay ────────────────────────────────────────── */
+.audio-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background-color: rgba(7, 16, 30, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+}
+
+.audio-overlay-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.audio-overlay-text {
+  margin: 0;
+  font-family: 'Figtree', sans-serif;
+  font-weight: 500;
+  font-size: 28px;
+  color: rgba(238, 243, 255, 0.70);
+  letter-spacing: 0.02em;
 }
 </style>

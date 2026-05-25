@@ -1,6 +1,4 @@
-import { define
-    
- } from 'pinia'
+import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 const SERVICES = [
@@ -174,6 +172,7 @@ export const useQueueStore = defineStore('queue', () => {
         if (t) {
             t.status          = 'skipped'
             t.noShowOverride  = override
+            t.noShowOccurred  = true   // permanent flag — survives reinstate for accurate stats
             if (t.calledAt && !t.durationMs) {
                 t.durationMs = Date.now() - new Date(t.calledAt).getTime()
             }
@@ -189,14 +188,15 @@ export const useQueueStore = defineStore('queue', () => {
     function reinstateFromHistory(turnId) {
         const t = turns.value.find(t => t.id === turnId)
         if (!t) return
-        t.status      = 'waiting'
-        t.createdAt   = new Date().toISOString()
-        t.calledAt    = null
-        t.callCount   = 0
-        t.callLog     = []
-        t.lastCalledAt = null
-        t.durationMs  = null
+        t.status         = 'waiting'
+        t.createdAt      = new Date().toISOString()
+        t.calledAt       = null
+        t.callCount      = 0
+        t.callLog        = []
+        t.lastCalledAt   = null
+        t.durationMs     = null
         t.noShowOverride = false
+        // noShowOccurred is intentionally NOT reset — the event happened and must stay in records
         broadcast()
     }
 
@@ -250,16 +250,22 @@ export const useQueueStore = defineStore('queue', () => {
 
     const history = computed(() =>
         turns.value
-        .filter(t => t.status !== 'waiting')
+        .filter(t => t.status !== 'waiting' && t.status !== 'deferred' && t.calledAt != null)
         .slice()
-        .reverse()
+        .sort((a, b) => new Date(b.calledAt) - new Date(a.calledAt))  // most recently called first
     )
 
     const stats = computed(() => ({
-        waiting:  turns.value.filter(t => t.status === 'waiting').length,
-        called:   turns.value.filter(t => ['called', 'attended', 'skipped'].includes(t.status)).length,
+        waiting:  turns.value.filter(t => t.status === 'waiting' || t.status === 'deferred').length,
+        // 'called' = any turn that has left the waiting state at least once.
+        // Includes reinstated turns (status: 'waiting' but noShowOccurred: true) so the
+        // original call is not erased from the agent's session tally.
+        called:   turns.value.filter(t =>
+            ['called', 'attended', 'skipped'].includes(t.status) || t.noShowOccurred === true
+        ).length,
         attended: turns.value.filter(t => t.status === 'attended').length,
-        skipped:  turns.value.filter(t => t.status === 'skipped').length,
+        // skipped = no-show events that actually occurred, even if patient was later reinstated
+        skipped:  turns.value.filter(t => t.noShowOccurred === true).length,
     }))
 
     return {
