@@ -95,6 +95,21 @@ function confirmNoShow() {
     showNoShowConfirm.value = false
 }
 
+// ── Overflow menu (··· exceptional actions) ───────────────────────────────────
+const showOverflow = ref(false)
+
+// Cancel turn confirmation (irreversible — needs its own dialog)
+const showCancelConfirm = ref(false)
+
+function confirmCancelTurn() {
+    store.cancelTurn(store.activeTurn.id)
+    showCancelConfirm.value = false
+}
+
+function closeOverflow() { showOverflow.value = false }
+onMounted(()  => document.addEventListener('click', closeOverflow))
+onUnmounted(() => document.removeEventListener('click', closeOverflow))
+
 function handleCtaClick() {
     if (ctaDisabled.value) return
     if (!store.activeTurn) { store.callNext(); return }
@@ -165,6 +180,18 @@ function statusDotMod(status) {
 // Enter  → finish turn (always, any call state)
 // Esc    → no-show path exclusively (shows confirmation dialog if < 3 calls)
 function handleKey(e) {
+    // Overflow menu: Escape closes it first, before anything else
+    if (showOverflow.value) {
+        if (e.code === 'Escape') { e.preventDefault(); showOverflow.value = false }
+        return
+    }
+    // Cancel confirm dialog
+    if (showCancelConfirm.value) {
+        if (e.code === 'Escape') { e.preventDefault(); showCancelConfirm.value = false }
+        if (e.code === 'Enter')  { e.preventDefault(); confirmCancelTurn() }
+        return
+    }
+    // No-show confirm dialog
     if (showNoShowConfirm.value) {
         if (e.code === 'Escape') { e.preventDefault(); showNoShowConfirm.value = false }
         if (e.code === 'Enter')  { e.preventDefault(); confirmNoShow() }
@@ -173,9 +200,8 @@ function handleKey(e) {
     if (e.code === 'Space') {
         e.preventDefault()
         if (!store.activeTurn) { store.callNext(); return }
-        if (ctaDisabled.value) return          // blocked during cooldown
+        if (ctaDisabled.value) return
         if (callCount.value < 3) store.recallTurn()
-        // callCount === 3: Space does nothing — Esc is the only path to no-show
     }
     if (e.code === 'Enter' && store.activeTurn) { e.preventDefault(); store.finishTurn() }
     if (e.code === 'Escape' && store.activeTurn) { e.preventDefault(); showNoShowConfirm.value = true }
@@ -318,21 +344,41 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                         <button class="end-turn-button" @click="store.finishTurn()">End turn
                             <kbd class="btn-kbd">(Enter)</kbd>
                         </button>
-                        <!-- No-show is now reached via Esc or the CTA progression;
-                             this button remains as a visible Esc-equivalent for mouse users -->
                         <button class="mark-no-show-button" @click="showNoShowConfirm = true">
                             No Show <kbd class="btn-kbd">(Esc)</kbd>
                         </button>
-                    </div>
 
-                    <!-- Exceptional actions — only available once a turn is active -->
-                    <div class="exceptional-actions">
-                        <button class="btn-ghost-sm" @click="store.suspendTurn()" title="Send patient back to queue (e.g. wrong number, needs to wait)">
-                            Defer turn
-                        </button>
-                        <button class="btn-ghost-sm btn-ghost-sm--danger" @click="store.cancelTurn(store.activeTurn.id)" title="Remove turn entirely (kiosk error, duplicate)">
-                            Cancel turn
-                        </button>
+                        <!-- ··· Overflow: exceptional actions (Defer / Cancel) -->
+                        <div class="overflow-wrap" @click.stop>
+                            <button
+                                class="btn-overflow"
+                                :aria-expanded="showOverflow"
+                                aria-haspopup="menu"
+                                aria-label="More turn options"
+                                @click.stop="showOverflow = !showOverflow"
+                            >···</button>
+
+                            <div v-if="showOverflow" class="overflow-menu" role="menu">
+                                <button
+                                    class="overflow-menu__item overflow-menu__item--defer"
+                                    role="menuitem"
+                                    @click="store.suspendTurn(); showOverflow = false"
+                                >
+                                    Defer turn
+                                </button>
+                                <button
+                                    class="overflow-menu__item overflow-menu__item--cancel"
+                                    role="menuitem"
+                                    @click="showOverflow = false; showCancelConfirm = true"
+                                >
+                                    <svg class="overflow-menu__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                        <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Z" fill="currentColor"/>
+                                        <path d="M7 4h2v5H7V4Zm0 6h2v2H7v-2Z" fill="currentColor"/>
+                                    </svg>
+                                    Cancel turn
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -391,6 +437,28 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
             </div>
         </section>
     </div>
+
+    <!-- ── Cancel Turn Confirmation Dialog ─────────────────────────────────── -->
+    <Teleport to="body">
+        <div v-if="showCancelConfirm" class="confirm-overlay" @click.self="showCancelConfirm = false">
+            <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-confirm-title">
+                <p class="confirm-title" id="cancel-confirm-title">Cancel this turn?</p>
+                <p class="confirm-body">
+                    Turn <strong>{{ store.activeTurn?.id }}</strong> will be permanently removed.
+                    This cannot be undone.
+                </p>
+                <div class="confirm-actions">
+                    <button class="btn-confirm-danger btn-confirm-danger--red" @click="confirmCancelTurn">
+                        Yes, cancel turn
+                    </button>
+                    <button class="btn-confirm-cancel" @click="showCancelConfirm = false">
+                        Go back
+                    </button>
+                </div>
+                <p class="confirm-hint">Enter to confirm · Esc to go back</p>
+            </div>
+        </div>
+    </Teleport>
 
     <!-- ── No-Show Confirmation Dialog ────────────────────────────────────── -->
     <Teleport to="body">
@@ -635,7 +703,8 @@ p {
 
 .turn-summary {
     width: min(1000px, 90%);
-    border: 10px solid #949494;
+    margin-top: auto;
+    border: 8px solid #949494;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
@@ -644,7 +713,7 @@ p {
     gap: 0;
     padding: 0;
     text-align: left;
-    font-size: 32px;
+    font-size: 24px;
     color: #000;
     font-family: 'figtree';
 }
@@ -653,20 +722,20 @@ p {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: clamp(8px, 1.5vh, 16px) clamp(16px, 2.5vw, 32px);
-    gap: clamp(16px, 2vw, 32px);
+    padding: clamp(4px, 1.2vh, 12px) clamp(12px, 2vw, 24px);
+    gap: clamp(12px, 1.6vw, 24px);
     flex-shrink: 0;
 }
 
 .status-title {
     font-family: 'Figtree', sans-serif;
-    font-size: clamp(18px, 2vw, 32px);
+    font-size: clamp(16px, 1.6vw, 24px);
     font-weight: 600;
     display: contents;
 }
 
 .turn {
-    font-size: clamp(40px, min(8vw, 9vh), 96px);
+    font-size: clamp(32px, min(6.5vw, 7.5vh), 80px);
     font-family: 'syne';
     color: #949494;
     line-height: 1;
@@ -689,9 +758,9 @@ p {
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    padding: clamp(8px, 1.5vh, 16px) clamp(16px, 2.5vw, 32px);
-    gap: clamp(10px, 1.5vw, 24px);
-    font-size: clamp(16px, 1.6vw, 24px);
+    padding: clamp(4px, 1.2vh, 12px) clamp(12px, 2vw, 24px);
+    gap: clamp(8px, 1.2vw, 20px);
+    font-size: clamp(13px, 1.3vw, 20px);
 }
 
 .name-info {
@@ -702,37 +771,37 @@ p {
 
 .name-value,
 .id-value {
-    font: 400 clamp(14px, 1.4vw, 20px) 'Figtree', sans-serif;
+    font: 400 clamp(13px, 1.1vw, 16px) 'Figtree', sans-serif;
     color: #000;
 }
 
 .condition-value {
-    font: 400 clamp(14px, 1.4vw, 20px) 'Figtree', sans-serif;
+    font: 400 clamp(13px, 1.1vw, 16px) 'Figtree', sans-serif;
     color: #92400E;
 }
 
 .called-time,
 .time-elapsed {
-    font: 500 clamp(12px, 1.2vw, 16px) 'Figtree', sans-serif;
+    font: 500 clamp(11px, 1vw, 13px) 'Figtree', sans-serif;
     color: #000;
 }
 
 .timing-info {
     display: flex;
     align-items: center;
-    gap: 16px;
-    font-size: clamp(14px, 1.5vw, 20px);
+    gap: 12px;
+    font-size: clamp(13px, 1.2vw, 16px);
     flex-wrap: wrap;
 }
 
 .called-info {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
 }
 
 .called-value {
-    font-size: clamp(12px, 1.2vw, 16px);
+    font-size: clamp(11px, 1vw, 13px);
 }
 
 .actions {
@@ -746,7 +815,7 @@ p {
 }
 
 .end-turn-button {
-    height: 48px;
+    height: 40px;
     flex: 1;
     min-width: min(280px, 45%);
     max-width: 500px;
@@ -754,12 +823,12 @@ p {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 12px;
+    padding: 8px;
     box-sizing: border-box;
     color: #0E3FA3;
     font-weight: 500;
     font-family: 'Figtree', sans-serif;
-    font-size: clamp(16px, 1.6vw, 24px);
+    font-size: clamp(13px, 1.3vw, 20px);
     gap: 16px;
     border: none;
     cursor: pointer;
@@ -771,7 +840,7 @@ p {
 }
 
 .mark-no-show-button {
-    height: 48px;
+    height: 40px;
     flex: 1;
     min-width: min(280px, 45%);
     max-width: 500px;
@@ -781,11 +850,11 @@ p {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 10px;
+    padding: 8px;
     color: #4B5563;
     font-weight: 500;
     font-family: 'Figtree', sans-serif;
-    font-size: clamp(16px, 1.6vw, 24px);
+    font-size: clamp(13px, 1.3vw, 20px);
     gap: 16px;
     cursor: pointer;
     transition: background-color 0.15s;
@@ -795,42 +864,110 @@ p {
     background-color: rgba(75, 85, 99, 0.08);
 }
 
-.exceptional-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: center;
-    padding: 8px 12px 12px;
-    width: 100%;
-    box-sizing: border-box;
+/* ── Overflow menu ───────────────────────────────────────────────────────── */
+.overflow-wrap {
+    position: relative;
     flex-shrink: 0;
 }
 
-.btn-ghost-sm {
-    font-family: 'Figtree', sans-serif;
-    font-size: clamp(11px, 1.1vw, 13px);
-    font-weight: 500;
-    color: #6B7280;
+.btn-overflow {
+    width: 36px;
+    height: 48px;
     background: transparent;
-    border: 1px solid rgba(107, 114, 128, 0.3);
+    border: 1px solid rgba(17, 24, 39, 0.16);
     border-radius: 6px;
-    padding: 5px 12px;
+    color: #6B7280;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
-    transition: background-color 0.15s, color 0.15s;
+    font-size: 18px;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    font-family: 'Figtree', sans-serif;
+    transition: background-color 150ms ease-out,
+                border-color    150ms ease-out,
+                color           150ms ease-out;
 }
 
-.btn-ghost-sm:hover {
-    background-color: rgba(107, 114, 128, 0.08);
+.btn-overflow:hover {
+    background: rgba(17, 24, 39, 0.06);
+    border-color: rgba(17, 24, 39, 0.28);
     color: #374151;
 }
 
-.btn-ghost-sm--danger {
-    color: #B45309;
-    border-color: rgba(180, 83, 9, 0.3);
+.btn-overflow[aria-expanded="true"] {
+    background: rgba(17, 24, 39, 0.08);
+    border-color: rgba(17, 24, 39, 0.32);
+    color: #111827;
 }
 
-.btn-ghost-sm--danger:hover {
-    background-color: rgba(180, 83, 9, 0.06);
-    color: #92400E;
+.btn-overflow:focus-visible {
+    outline: 2px solid #1A72FF;
+    outline-offset: 2px;
+}
+
+.overflow-menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    right: 0;
+    min-width: 168px;
+    background: #FFFFFF;
+    border: 1px solid rgba(17, 24, 39, 0.10);
+    border-radius: 8px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08),
+                0 10px 24px -4px rgba(0, 0, 0, 0.12);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    z-index: 100;
+    transform-origin: bottom right;
+    animation: menu-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes menu-in {
+    from { opacity: 0; transform: scale(0.94) translateY(4px); }
+    to   { opacity: 1; transform: scale(1)    translateY(0);   }
+}
+
+.overflow-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-family: 'Figtree', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+    transition: background-color 100ms ease-out,
+                color            100ms ease-out;
+}
+
+.overflow-menu__item--defer { color: #374151; }
+.overflow-menu__item--defer:hover {
+    background: rgba(17, 24, 39, 0.06);
+    color: #111827;
+}
+
+.overflow-menu__item--cancel { color: #DC2626; }
+.overflow-menu__item--cancel:hover {
+    background: rgba(220, 38, 38, 0.08);
+    color: #B91C1C;
+}
+
+.overflow-menu__icon {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    opacity: 0.85;
 }
 
 .side-panel {
@@ -1341,6 +1478,8 @@ p {
     transition: background-color 0.15s;
 }
 .btn-confirm-danger:hover { background: #D4901F; }
+.btn-confirm-danger--red { background: #DC2626; color: #FFFFFF; }
+.btn-confirm-danger--red:hover { background: #B91C1C; }
 .btn-confirm-cancel {
     font-family: 'Figtree', sans-serif;
     font-weight: 500;
