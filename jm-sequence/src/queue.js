@@ -2,14 +2,14 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 const SERVICES = [
-    { id: 'A', label: 'Admission', prefix: 'A' },
-    { id: 'C', label: 'Consultation', prefix: 'C' },
-    { id: 'E', label: 'Emergency', prefix: 'E' },
-    { id: 'L', label: 'Labs', prefix: 'L' },
-    { id: 'P', label: 'Pharmacy', prefix: 'P' },
-    { id: 'R', label: 'Rehabilitation', prefix: 'R' },
-    { id: 'S', label: 'Specialty', prefix: 'S' },
-    { id: 'X', label: 'X-ray', prefix: 'X' }
+    { id: 'A', label: 'Admission',      labelEs: 'Admisión',       prefix: 'A', color: '#1A72FF' },
+    { id: 'C', label: 'Consultation',   labelEs: 'Consulta',       prefix: 'C', color: '#20CB8B' },
+    { id: 'E', label: 'Emergency',      labelEs: 'Emergencias',    prefix: 'E', color: '#EF4444' },
+    { id: 'L', label: 'Labs',           labelEs: 'Laboratorio',    prefix: 'L', color: '#8B5CF6' },
+    { id: 'P', label: 'Pharmacy',       labelEs: 'Farmacia',       prefix: 'P', color: '#F59E0B' },
+    { id: 'R', label: 'Rehabilitation', labelEs: 'Rehabilitación', prefix: 'R', color: '#06B6D4' },
+    { id: 'S', label: 'Specialty',      labelEs: 'Especialidades', prefix: 'S', color: '#EC4899' },
+    { id: 'X', label: 'X-ray',          labelEs: 'Rayos X',        prefix: 'X', color: '#6B7280' },
 ]
 
 // 20 pre-generated turns ready for the agent/FOH demo.
@@ -42,15 +42,15 @@ const DEMO_TURNS = [
 // ─── DEMO COUNTER CONFIG ──────────────────────────────────────────────────────
 // Maps counter ID → array of accepted serviceIDs (admin-assigned, inherited by agent)
 const DEMO_COUNTERS = [
-  { id: 1, label: 'Counter 1', serviceIDs: ['L', 'X'], status: 'active' },
-  { id: 2, label: 'Counter 2', serviceIDs: ['A', 'C'], status: 'active' },
-  { id: 3, label: 'Counter 3', serviceIDs: ['S', 'R'], status: 'active' },
-  { id: 4, label: 'Counter 4', serviceIDs: ['P', 'E'], status: 'active' },
+  { id: 1, label: 'Counter 1', serviceIDs: ['L', 'X'], status: 'active'   },
+  { id: 2, label: 'Counter 2', serviceIDs: ['A', 'C'], status: 'inactive' },
+  { id: 3, label: 'Counter 3', serviceIDs: ['S', 'R'], status: 'inactive' },
+  { id: 4, label: 'Counter 4', serviceIDs: ['P', 'E'], status: 'inactive' },
 ]
 
 export const useQueueStore = defineStore('queue', () => {
     // State
-  const turns    = ref(DEMO_TURNS.map(t => ({ ...t })))
+  const turns    = ref([])
   const activeTurn = ref(null)
   const counters = ref(DEMO_COUNTERS.map(c => ({ ...c, currentTurnId: null })))
   // Monotonic counter incremented ONLY in callNext() and recallTurn().
@@ -91,7 +91,7 @@ export const useQueueStore = defineStore('queue', () => {
         const saved = localStorage.getItem('jm-state')
         if (saved) {
             const s = JSON.parse(saved)
-            turns.value      = s.turns      || DEMO_TURNS.map(t => ({ ...t }))
+            turns.value      = s.turns      || []
             activeTurn.value = s.activeTurn || null
             counters.value   = s.counters   || DEMO_COUNTERS.map(c => ({ ...c, currentTurnId: null }))
             callSeq.value    = s.callSeq    || 0
@@ -230,6 +230,42 @@ export const useQueueStore = defineStore('queue', () => {
         broadcast()
     }
 
+    /** Create a new turn from the kiosk. Returns the turn object. */
+    function createTurn(serviceId, patientName, idNumber, specialCondition) {
+        const service = SERVICES.find(s => s.id === serviceId)
+        if (!service) return null
+
+        const prefix = service.prefix
+        const nums = turns.value
+            .filter(t => t.id.startsWith(prefix))
+            .map(t => parseInt(t.id.slice(prefix.length)) || 0)
+        const nextNum = (nums.length > 0 ? Math.max(...nums) : 0) + 1
+        const id = `${prefix}${String(nextNum).padStart(3, '0')}`
+
+        const priority = specialCondition && specialCondition !== 'Normal' ? 'special' : 'normal'
+
+        const turn = {
+            id,
+            serviceID: serviceId,
+            serviceLabel: service.label,
+            priority,
+            status: 'waiting',
+            createdAt: new Date().toISOString(),
+            calledAt: null,
+            patientName: patientName || '',
+            idNumber: idNumber || '',
+            specialCondition: specialCondition || 'Normal',
+            callCount: 0,
+            callLog: [],
+            reinstated: false,
+            durationMs: null,
+        }
+
+        turns.value.push(turn)
+        broadcast()
+        return turn
+    }
+
     /** Reset all state back to the original 20 demo turns. */
     function resetDemo() {
         turns.value      = DEMO_TURNS.map(t => ({ ...t }))
@@ -295,6 +331,7 @@ export const useQueueStore = defineStore('queue', () => {
         reinstateFromHistory,
         suspendTurn,
         cancelTurn,
+        createTurn,
         loadFromStorage,
         resetDemo,
         // getters

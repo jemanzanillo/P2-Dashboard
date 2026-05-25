@@ -3,6 +3,7 @@ import Launcher from './Launcher.vue'
 
 const FohView   = () => import('./views/fohView.vue')
 const AgentView = () => import('./views/agentView.vue')
+const KioskView = () => import('./views/kioskView.vue')
 
 export default createRouter({
   history: createWebHistory(),
@@ -10,5 +11,6 @@ export default createRouter({
     { path: '/',       component: Launcher  },
     { path: '/foh',    component: FohView    },
     { path: '/agent',  component: AgentView  },
+    { path: '/kiosk',  component: KioskView  },
   ],
 })
