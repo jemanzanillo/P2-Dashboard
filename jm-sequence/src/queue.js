@@ -99,21 +99,14 @@ export const useQueueStore = defineStore('queue', () => {
      * Priority (special > normal) then FIFO.
      */
     function callNext() {
-        const next = turns.value
-        .filter(t => t.status === 'waiting')
-        .sort((a, b) => {
-            if (a.priority === 'special' && b.priority !== 'special') return -1
-            if (b.priority === 'special' && a.priority !== 'special') return 1
-            return new Date(a.createdAt) - new Date(b.createdAt)
-        })[0]
-    
+        // Strict guard — never displace a turn already in progress.
+        // The UI already enforces this, but this makes it safe at the store level too.
+        if (activeTurn.value) return null
+
+        // Use waitingTurns — single source of truth for priority order
+        // (reinstated → special → FIFO)
+        const next = waitingTurns.value[0]
         if (!next) return null
-    
-        // Mark any previous active turn as attended first
-        if (activeTurn.value) {
-        const prev = turns.value.find(t => t.id === activeTurn.value.id)
-        if (prev && prev.status === 'called') prev.status = 'attended'
-        }
     
         next.status       = 'called'
         next.calledAt     = new Date().toISOString()
@@ -183,12 +176,15 @@ export const useQueueStore = defineStore('queue', () => {
 
     /**
      * Re-queue a skipped (no-show) turn from history.
-     * Patient data is preserved; gets a fresh createdAt so it lands at the back of FIFO queue.
+     * Uses 'deferred' status so the turn enters the sorted queue without conflicting with
+     * any currently active turn. The agent calls them normally with Call Next when ready.
+     * `reinstated: true` gives them front-of-queue priority (above special, above FIFO).
      */
     function reinstateFromHistory(turnId) {
         const t = turns.value.find(t => t.id === turnId)
         if (!t) return
-        t.status         = 'waiting'
+        t.status         = 'deferred'     // queued but not "waiting" — no conflict with activeTurn
+        t.reinstated     = true           // → sorted above all others in waitingTurns
         t.createdAt      = new Date().toISOString()
         t.calledAt       = null
         t.callCount      = 0
@@ -240,8 +236,13 @@ export const useQueueStore = defineStore('queue', () => {
         // 'deferred' turns re-enter the queue at back-of-FIFO (fresh createdAt)
         .filter(t => t.status === 'waiting' || t.status === 'deferred')
         .sort((a, b) => {
+            // 1. Reinstated (survived 3-call protocol, just arrived) → absolute front
+            if (a.reinstated && !b.reinstated) return -1
+            if (b.reinstated && !a.reinstated) return 1
+            // 2. Special medical priority (pregnant, elderly, disabled)
             if (a.priority === 'special' && b.priority !== 'special') return -1
             if (b.priority === 'special' && a.priority !== 'special') return 1
+            // 3. FIFO within each tier
             return new Date(a.createdAt) - new Date(b.createdAt)
         })
     )
@@ -250,7 +251,8 @@ export const useQueueStore = defineStore('queue', () => {
 
     const history = computed(() =>
         turns.value
-        .filter(t => t.status !== 'waiting' && t.status !== 'deferred' && t.calledAt != null)
+        // Only completed turns (attended ✓ / no-show ✓) — active 'called' turns stay out of history
+        .filter(t => (t.status === 'attended' || t.status === 'skipped') && t.calledAt != null)
         .slice()
         .sort((a, b) => new Date(b.calledAt) - new Date(a.calledAt))  // most recently called first
     )

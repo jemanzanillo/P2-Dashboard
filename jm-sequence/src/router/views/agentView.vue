@@ -872,7 +872,7 @@ p {
 
 .btn-overflow {
     width: 36px;
-    height: 48px;
+    height: 40px;
     background: transparent;
     border: 1px solid rgba(17, 24, 39, 0.16);
     border-radius: 6px;

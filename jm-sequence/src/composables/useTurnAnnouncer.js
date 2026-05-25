@@ -29,14 +29,10 @@ export function useTurnAnnouncer() {
 
   function playChime(isRecall) {
     const audioCtx = getContext()
-    if (isRecall) {
-      // Single soft tone for recalls
-      _playNote(audioCtx, 880, audioCtx.currentTime, 0.18)
-    } else {
-      CHIME_NOTES.forEach((freq, i) => {
-        _playNote(audioCtx, freq, audioCtx.currentTime + i * NOTE_SPACING, 0.28)
-      })
-    }
+    const notes = isRecall ? [...CHIME_NOTES].reverse() : CHIME_NOTES
+    notes.forEach((freq, i) => {
+      _playNote(audioCtx, freq, audioCtx.currentTime + i * NOTE_SPACING, 0.28)
+    })
   }
 
   function _playNote(audioCtx, freq, startTime, peakGain) {
