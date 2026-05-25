@@ -53,6 +53,9 @@ export const useQueueStore = defineStore('queue', () => {
   const turns    = ref(DEMO_TURNS.map(t => ({ ...t })))
   const activeTurn = ref(null)
   const counters = ref(DEMO_COUNTERS.map(c => ({ ...c, currentTurnId: null })))
+  // Monotonic counter incremented ONLY in callNext() and recallTurn().
+  // Primitive number → Vue won't fire watchers when reinstate/defer/finish re-send the same value.
+  const callSeq = ref(0)
 
   // Active agent's counter (demo: counter 1)
   const agentCounterId = ref(1)
@@ -61,18 +64,22 @@ export const useQueueStore = defineStore('queue', () => {
     const channel = new BroadcastChannel('jm-sequence')
     channel.onmessage = (e) => {
         if (e.data.type === 'STATE_UPDATE') {
-            turns.value = e.data.turns
+            turns.value      = e.data.turns
             activeTurn.value = e.data.activeTurn
-            counters.value = e.data.counters
+            counters.value   = e.data.counters
+            // Primitive assignment — Vue skips the watcher if the value hasn't changed,
+            // so spurious broadcasts (reinstate, defer, etc.) don't re-trigger FOH announcements.
+            callSeq.value    = e.data.callSeq ?? 0
         }
     }
 
     function broadcast() {
         const payload = {
-        type:        'STATE_UPDATE',
-        turns:       turns.value,
-        activeTurn:  activeTurn.value,
-        counters:    counters.value,
+            type:       'STATE_UPDATE',
+            turns:      turns.value,
+            activeTurn: activeTurn.value,
+            counters:   counters.value,
+            callSeq:    callSeq.value,
         }
         try { channel.postMessage(payload) } catch {}
         try { localStorage.setItem('jm-state', JSON.stringify(payload)) } catch {}
@@ -87,6 +94,7 @@ export const useQueueStore = defineStore('queue', () => {
             turns.value      = s.turns      || DEMO_TURNS.map(t => ({ ...t }))
             activeTurn.value = s.activeTurn || null
             counters.value   = s.counters   || DEMO_COUNTERS.map(c => ({ ...c, currentTurnId: null }))
+            callSeq.value    = s.callSeq    || 0
         }
         } catch {}
     }
@@ -116,11 +124,12 @@ export const useQueueStore = defineStore('queue', () => {
         next.lastCalledAt = next.calledAt
         next.callLog      = [{ callNumber: 1, timestamp: next.calledAt }]
         activeTurn.value  = { ...next }
-    
+        callSeq.value++   // signals FOH to announce — only incremented here and in recallTurn
+
         // Update counter display
         const counter = counters.value.find(c => c.id === agentCounterId.value)
         if (counter) counter.currentTurnId = next.id
-    
+
         broadcast()
         return next
     }
@@ -151,6 +160,7 @@ export const useQueueStore = defineStore('queue', () => {
         t.lastCalledAt = new Date().toISOString()
         t.callLog      = [...(t.callLog || []), { callNumber: t.callCount, timestamp: t.lastCalledAt }]
         activeTurn.value = { ...t }
+        callSeq.value++   // signals FOH to announce the recall
         broadcast()
     }
 
@@ -276,6 +286,7 @@ export const useQueueStore = defineStore('queue', () => {
         activeTurn,
         counters,
         agentCounterId,
+        callSeq,
         // actions
         callNext,
         recallTurn,

@@ -144,13 +144,20 @@ const mountComplete = ref(false)
 
 // Persist last called turn so the panel never goes blank between turns
 const lastCalledTurn = ref(store.activeTurn ? { ...store.activeTurn } : null)
+
+// Keep display panel in sync — no announcement logic here
 watch(() => store.activeTurn, (newVal) => {
-  if (newVal) {
-    lastCalledTurn.value = { ...newVal }
-    if (mountComplete.value) {
-      announce(newVal, (newVal.callCount ?? 1) > 1)
-    }
-  }
+  if (newVal) lastCalledTurn.value = { ...newVal }
+})
+
+// Announce ONLY when callSeq increments (callNext / recallTurn).
+// callSeq is a primitive number — Vue skips this watcher entirely when reinstate,
+// defer, finish, or any other broadcast sends the same seq value back.
+watch(() => store.callSeq, () => {
+  if (!mountComplete.value) return
+  const turn = store.activeTurn
+  if (!turn) return
+  announce(turn, (turn.callCount ?? 1) > 1)
 })
 
 // Live clock
