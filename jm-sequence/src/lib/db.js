@@ -75,11 +75,31 @@ export async function fetchSingleTurn(uuid) {
   return mapTurnRow(data)
 }
 
+export async function fetchConditions() {
+  const { data, error } = await supabase
+    .from('condiciones_especiales')
+    .select('id, nombre, icono, orden')
+    .eq('activa', true)
+    .order('orden')
+  if (error) throw error
+  return data
+}
+
+export async function fetchServices() {
+  const { data, error } = await supabase
+    .from('servicios')
+    .select('id, nombre, nombre_corto, prefijo_turno, color_token, icono_codigo, orden_kiosk')
+    .eq('estado', 'activo')
+    .order('orden_kiosk')
+  if (error) throw error
+  return data
+}
+
 export async function fetchCounters() {
   const [{ data: counters, error: ce }, { data: activeTurnos, error: te }] = await Promise.all([
     supabase
       .from('ventanillas')
-      .select('id, numero, etiqueta, estado, agente_id, es_prioritaria')
+      .select('id, numero, etiqueta, estado, agente_id, es_prioritaria, ventanilla_servicios(servicio_id)')
       .order('numero'),
     supabase
       .from('turnos')
@@ -97,7 +117,7 @@ export async function fetchCounters() {
     id:            row.id,
     label:         row.etiqueta,
     status:        row.estado === 'activa' ? 'active' : 'inactive',
-    serviceIDs:    [],   // ventanillas_servicios join deferred until FK is set up
+    serviceIDs:    (row.ventanillas_servicios ?? []).map(vs => vs.servicio_id),
     currentTurnId: activeMap[row.id] ?? null,
   }))
 }
@@ -210,6 +230,21 @@ export async function cancelTurn({ dbId, motivo }) {
   const { error } = await supabase
     .from('turnos')
     .update({ estado: 'cancelado', motivo_anulacion: motivo ?? null })
+    .eq('id', dbId)
+  if (error) throw error
+}
+
+export async function transferTurn({ dbId, newVentanillaId }) {
+  const { error } = await supabase
+    .from('turnos')
+    .update({
+      ventanilla_id:       newVentanillaId,
+      estado:              'diferido',
+      puede_atender_desde: '1970-01-01T00:00:00Z',
+      reinstated:          true,
+      called_at:           null,
+      call_count:          0,
+    })
     .eq('id', dbId)
   if (error) throw error
 }

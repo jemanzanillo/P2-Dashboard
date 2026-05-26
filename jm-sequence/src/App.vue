@@ -1,16 +1,20 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { watch, onUnmounted } from 'vue'
 import { useQueueStore } from '@/queue.js'
+import { useAuthStore } from '@/auth.js'
 
-const router = useRouter()
-const store  = useQueueStore()
+const store = useQueueStore()
+const auth  = useAuthStore()
 
-function openScreen(path) {
-  router.push(path)
-}
+watch(
+  () => auth.user,
+  (user) => {
+    if (user) store.init()
+    else      store.cleanup()
+  },
+  { immediate: true }
+)
 
-onMounted(() => store.init())
 onUnmounted(() => store.cleanup())
 </script>
 

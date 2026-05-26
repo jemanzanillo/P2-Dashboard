@@ -1,12 +1,13 @@
 <script setup>
 import { useRouter } from 'vue-router'
+import { useLocaleStore } from '@/locale.js'
 
 const router = useRouter()
+const locale = useLocaleStore()
 
 function openScreen(path) {
   router.push(path)
 }
-
 </script>
 
 <template>
@@ -18,6 +19,20 @@ function openScreen(path) {
         <h1 class="launcher-title">Hospital Docente Universitario<br>Dr. Darío Contreras</h1>
         <p class="launcher-sub">JM Sequence — Queue Management System</p>
       </header>
+
+      <!-- Language toggle -->
+      <div class="lang-toggle" role="group" aria-label="Language">
+        <button
+          class="lang-btn"
+          :class="{ 'lang-btn--active': locale.lang === 'es' }"
+          @click="locale.setLang('es')"
+        >ES</button>
+        <button
+          class="lang-btn"
+          :class="{ 'lang-btn--active': locale.lang === 'en' }"
+          @click="locale.setLang('en')"
+        >EN</button>
+      </div>
 
       <nav class="launcher-nav">
 
@@ -43,7 +58,7 @@ function openScreen(path) {
 
         <button class="btn btn--kiosk" @click="openScreen('/kiosk')">
           <div class="btn-content">
-            <span class="btn-label">Quiosco (Paciente)</span>
+            <span class="btn-label">{{ locale.lang === 'es' ? 'Quiosco (Paciente)' : 'Kiosk (Patient)' }}</span>
             <span class="btn-sub">1024 × 768 · iPad 9th gen</span>
           </div>
           <svg class="btn-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -88,7 +103,7 @@ function openScreen(path) {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 40px;
+  gap: 32px;
 }
 
 /* ── Header ─────────────────────────────────────────────────────────────── */
@@ -128,6 +143,42 @@ function openScreen(path) {
   font-size: 14px;
   font-weight: 400;
   color: rgba(238, 243, 255, 0.50);
+}
+
+/* ── Language toggle ─────────────────────────────────────────────────────── */
+.lang-toggle {
+  display: flex;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+  padding: 3px;
+  width: fit-content;
+  gap: 2px;
+}
+
+.lang-btn {
+  font-family: 'Figtree', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: rgba(238, 243, 255, 0.45);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 16px;
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.lang-btn:hover:not(.lang-btn--active) {
+  color: rgba(238, 243, 255, 0.75);
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.lang-btn--active {
+  color: #EEF3FF;
+  background-color: #1A72FF;
 }
 
 /* ── Nav buttons ─────────────────────────────────────────────────────────── */
@@ -204,18 +255,6 @@ function openScreen(path) {
 .btn--kiosk:hover {
   background-color: #0e2a1e;
   border-color: rgba(32, 203, 139, 0.6);
-}
-
-/* Ghost — Reset */
-.btn--ghost {
-  background-color: transparent;
-  color: rgba(238, 243, 255, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-}
-.btn--ghost:hover {
-  background-color: rgba(220, 60, 60, 0.07);
-  border-color: rgba(220, 60, 60, 0.35);
-  color: #F87171;
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */

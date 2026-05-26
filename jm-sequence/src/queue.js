@@ -3,6 +3,8 @@ import { ref, computed } from 'vue'
 import {
   fetchTurns,
   fetchCounters,
+  fetchServices,
+  fetchConditions,
   fetchSingleTurn,
   mapTurnRow,
   insertTurn    as dbInsertTurn,
@@ -13,28 +15,19 @@ import {
   reinstateTurn as dbReinstateTurn,
   suspendTurn   as dbSuspendTurn,
   cancelTurn    as dbCancelTurn,
+  transferTurn  as dbTransferTurn,
   subscribeToChanges,
 } from '@/lib/db.js'
-
-const SERVICES = [
-    { id: 'admision',      label: 'Admisión',      labelEs: 'Admisión',      prefix: 'AD', color: '#1A72FF' },
-    { id: 'citas',         label: 'Citas',          labelEs: 'Citas',          prefix: 'CI', color: '#06B6D4' },
-    { id: 'consulta',      label: 'Consulta',       labelEs: 'Consulta',       prefix: 'CO', color: '#8B5CF6' },
-    { id: 'cura',          label: 'Cura',           labelEs: 'Cura',           prefix: 'CU', color: '#20CB8B' },
-    { id: 'especialidad',  label: 'Especialidad',   labelEs: 'Especialidad',   prefix: 'ES', color: '#EF4444' },
-    { id: 'farmacia',      label: 'Farmacia',       labelEs: 'Farmacia',       prefix: 'FA', color: '#10B981' },
-    { id: 'laboratorio',   label: 'Laboratorio',    labelEs: 'Laboratorio',    prefix: 'LA', color: '#F59E0B' },
-    { id: 'rayosx',        label: 'Rayos X',        labelEs: 'Rayos X',        prefix: 'RX', color: '#EC4899' },
-    { id: 'yeso',          label: 'Yeso',           labelEs: 'Yeso',           prefix: 'YE', color: '#F97316' },
-]
 
 export const useQueueStore = defineStore('queue', () => {
   // ── State ──────────────────────────────────────────────────────────────────
   const turns          = ref([])
   const activeTurn     = ref(null)
   const counters       = ref([])
+  const services       = ref([])
+  const conditions     = ref([])
   const callSeq        = ref(0)
-  const agentCounterId = ref(1)
+  const agentCounterId = ref(null)
 
   const initialized = ref(false)
   const loading     = ref(false)
@@ -74,7 +67,7 @@ export const useQueueStore = defineStore('queue', () => {
         // Increment callSeq so FOH announces — only on first call or recall
         const firstCall = oldRow?.called_at == null && newRow?.called_at != null
         const isRecall  = newRow?.call_count > (oldRow?.call_count ?? 0) && oldRow?.called_at != null
-        if ((firstCall || isRecall) && turn.counterId === agentCounterId.value) {
+        if ((firstCall || isRecall) && agentCounterId.value != null && turn.counterId === agentCounterId.value) {
           callSeq.value++
         }
       })
@@ -101,9 +94,13 @@ export const useQueueStore = defineStore('queue', () => {
     loading.value = true
     error.value   = null
     try {
-      const [turnsData, countersData] = await Promise.all([fetchTurns(), fetchCounters()])
-      turns.value    = turnsData
-      counters.value = countersData
+      const [turnsData, countersData, servicesData, conditionsData] = await Promise.all([
+        fetchTurns(), fetchCounters(), fetchServices(), fetchConditions(),
+      ])
+      turns.value      = turnsData
+      counters.value   = countersData
+      services.value   = servicesData
+      conditions.value = conditionsData
 
       // Restore any in-progress turn for this agent's counter
       const myCounter = counters.value.find(c => c.id === agentCounterId.value)
@@ -211,8 +208,16 @@ export const useQueueStore = defineStore('queue', () => {
     }
   }
 
-  async function createTurn(serviceId, patientName, idNumber, specialCondition) {
-    const condicionIds = []
+  async function transferTurn(newCounterId) {
+    if (!activeTurn.value) return
+    try {
+      await dbTransferTurn({ dbId: activeTurn.value.dbId, newVentanillaId: newCounterId })
+    } catch (e) {
+      error.value = e.message
+    }
+  }
+
+  async function createTurn(serviceId, patientName, idNumber, condicionIds = []) {
     try {
       const result = await dbInsertTurn({ serviceId, patientName, idNumber, condicionIds })
       return { id: result.numero, dbId: result.id }
@@ -259,6 +264,8 @@ export const useQueueStore = defineStore('queue', () => {
     turns,
     activeTurn,
     counters,
+    services,
+    conditions,
     agentCounterId,
     callSeq,
     initialized,
@@ -274,13 +281,12 @@ export const useQueueStore = defineStore('queue', () => {
     reinstateFromHistory,
     suspendTurn,
     cancelTurn,
+    transferTurn,
     createTurn,
     // getters
     waitingTurns,
     nextTurn,
     history,
     stats,
-    // constants
-    SERVICES,
   }
 })

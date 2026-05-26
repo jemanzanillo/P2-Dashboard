@@ -1,34 +1,47 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useQueueStore } from '@/queue.js'
+import { useAuthStore } from '@/auth'
+import { useLocaleStore } from '@/locale.js'
 
-const store = useQueueStore()
+const store  = useQueueStore()
+const auth   = useAuthStore()
+const router = useRouter()
+const locale = useLocaleStore()
+
+async function logout() {
+    store.cleanup()
+    await auth.logout()
+    router.push('/login')
+}
 
 // ── Clock ─────────────────────────────────────────────────────────────────────
 const currentTime = ref('')
-// Reactive timestamp — used for elapsed display AND cooldown countdown
 const nowMs = ref(Date.now())
 
 function updateClock() {
     const d = new Date()
-    currentTime.value = d.toLocaleTimeString('es-DO', {
+    currentTime.value = d.toLocaleTimeString(locale.t('common.dateLocale'), {
         hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
     })
 }
 let clockTimer
 let elapsedTimer
-const elapsedDisplay = ref('0 min 0 seg')
+const elapsedDisplay = ref('—')
 
 function updateElapsed() {
-    nowMs.value = Date.now()  // drives cooldown computeds too
+    nowMs.value = Date.now()
     if (!store.activeTurn?.calledAt) { elapsedDisplay.value = '—'; return }
     const diff = Math.floor((Date.now() - new Date(store.activeTurn.calledAt)) / 1000)
     const m = Math.floor(diff / 60)
     const s = diff % 60
-    elapsedDisplay.value = `${m} min ${s} seg`
+    elapsedDisplay.value = `${m} ${locale.t('common.min')} ${s} ${locale.t('common.sec')}`
 }
 
-onMounted(() => {
+onMounted(async () => {
+    store.agentCounterId = auth.profile?.ventanilla_id ?? null
+    await store.init()
     updateClock()
     clockTimer  = setInterval(updateClock, 1000)
     elapsedTimer = setInterval(updateElapsed, 1000)
@@ -36,6 +49,7 @@ onMounted(() => {
 onUnmounted(() => {
     clearInterval(clockTimer)
     clearInterval(elapsedTimer)
+    store.cleanup()
 })
 
 // ── 3-Call Protocol ───────────────────────────────────────────────────────────
@@ -46,47 +60,40 @@ const lastCalledAt = computed(() => store.activeTurn?.lastCalledAt ?? null)
 
 const cooldownRemaining = computed(() => {
     if (!lastCalledAt.value) return 0
-    // Cooldown applies after every call — including the 3rd — giving patients wiggle room
     const elapsed = (nowMs.value - new Date(lastCalledAt.value).getTime()) / 1000
     return Math.max(0, Math.ceil(COOLDOWN_SECS - elapsed))
 })
 
 const isInCooldown = computed(() => cooldownRemaining.value > 0)
 
-// SVG ring: circumference = 2π × r(54) ≈ 339.3
-// offset 0 = full ring (cooldown just started), 339.3 = empty (cooldown done)
 const RING_CIRCUMFERENCE = 339.3
 const ringOffset = computed(() =>
     RING_CIRCUMFERENCE * (1 - cooldownRemaining.value / COOLDOWN_SECS)
 )
 
 const ctaLabel = computed(() => {
-    if (!store.activeTurn) return 'CALL NEXT'
-    if (callCount.value === 1) return 'CALL AGAIN'
-    if (callCount.value === 2) return 'LAST CALL'
-    // call-3: show 'LAST CALL' during its cooldown, then reveal 'MARK NO SHOW'
-    if (isInCooldown.value) return 'LAST CALL'
-    return 'MARK NO SHOW'
+    if (!store.activeTurn) return locale.t('agent.callNext')
+    if (callCount.value === 1) return locale.t('agent.callAgain')
+    if (callCount.value === 2) return locale.t('agent.lastCall')
+    if (isInCooldown.value) return locale.t('agent.lastCall')
+    return locale.t('agent.markNoShow')
 })
 
-// CTA is disabled while any cooldown is running (all 3 calls, including post-3rd)
 const ctaDisabled = computed(() => {
     if (!store.activeTurn) return !store.nextTurn
     return isInCooldown.value
 })
 
-// Destructive amber state: only after the 3rd call cooldown has fully expired
 const ctaIsDestructive = computed(() => callCount.value >= 3 && !isInCooldown.value)
 
-// Last call timestamp formatted for the call indicator
 const lastCallTime = computed(() => {
     if (!lastCalledAt.value) return ''
-    return new Date(lastCalledAt.value).toLocaleTimeString('es-DO', {
+    return new Date(lastCalledAt.value).toLocaleTimeString(locale.t('common.dateLocale'), {
         hour: '2-digit', minute: '2-digit'
     })
 })
 
-// ── Confirmation dialog (Esc → no-show override) ──────────────────────────────
+// ── Confirmation dialogs ──────────────────────────────────────────────────────
 const showNoShowConfirm = ref(false)
 
 function confirmNoShow() {
@@ -94,15 +101,26 @@ function confirmNoShow() {
     showNoShowConfirm.value = false
 }
 
-// ── Overflow menu (··· exceptional actions) ───────────────────────────────────
 const showOverflow = ref(false)
-
-// Cancel turn confirmation (irreversible — needs its own dialog)
 const showCancelConfirm = ref(false)
 
 function confirmCancelTurn() {
     store.cancelTurn(store.activeTurn.id)
     showCancelConfirm.value = false
+}
+
+const showTransferDialog = ref(false)
+const selectedTransferCounterId = ref(null)
+
+const transferableCounters = computed(() =>
+    store.counters.filter(c => c.status === 'active' && c.id !== store.agentCounterId)
+)
+
+function confirmTransfer() {
+    if (!selectedTransferCounterId.value) return
+    store.transferTurn(selectedTransferCounterId.value)
+    showTransferDialog.value = false
+    selectedTransferCounterId.value = null
 }
 
 function closeOverflow() { showOverflow.value = false }
@@ -124,73 +142,77 @@ const agentCounter = computed(() =>
 const counterServices = computed(() => {
     if (!agentCounter.value) return []
     return agentCounter.value.serviceIDs.map(id =>
-        store.SERVICES.find(s => s.id === id)?.label || id
+        store.services.find(s => s.id === id)?.nombre ?? id
     )
 })
 
 const historyItems = computed(() => store.history)
 
-// ── Duration helper ───────────────────────────────────────────────────────────
+// ── Duration helpers ──────────────────────────────────────────────────────────
 function formatDuration(turn) {
+    const sec = locale.t('common.sec')
+    const min = locale.t('common.min')
     if (turn.durationMs != null) {
         const totalSec = Math.floor(turn.durationMs / 1000)
         const m = Math.floor(totalSec / 60)
         const s = totalSec % 60
-        if (m === 0) return `${s} seg`
-        return s === 0 ? `${m} min` : `${m} min ${s} seg`
+        if (m === 0) return `${s} ${sec}`
+        return s === 0 ? `${m} ${min}` : `${m} ${min} ${s} ${sec}`
     }
     if (turn.calledAt) {
-
         const diff = Math.floor((Date.now() - new Date(turn.calledAt)) / 1000)
         const m = Math.floor(diff / 60)
         const s = diff % 60
-        if (m === 0) return `${s} seg`
-        return s === 0 ? `${m} min` : `${m} min ${s} seg`
+        if (m === 0) return `${s} ${sec}`
+        return s === 0 ? `${m} ${min}` : `${m} ${min} ${s} ${sec}`
     }
     return '—'
 }
 
-// ── History duration formatter (minutes only) ─────────────────────────────────
 function formatHistoryDuration(turn) {
+    const min = locale.t('common.min')
     if (turn.durationMs != null) {
         const totalSec = Math.floor(turn.durationMs / 1000)
         const m = Math.floor(totalSec / 60)
-        return m === 0 ? '0 min' : `${m} min`
+        return m === 0 ? `0 ${min}` : `${m} ${min}`
     }
     return '—'
 }
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 function statusLabel(status) {
-    return { attended: 'Attended', skipped: 'No Show', called: 'Called' }[status] || status
+    const map = {
+        attended: 'common.status.attended',
+        skipped:  'common.status.noshow',
+        called:   'common.status.called',
+    }
+    return locale.t(map[status] ?? status)
 }
-// Badge colour class
+
 function statusBadgeMod(status) {
     return { attended: 'badge--green', skipped: 'badge--amber', called: 'badge--blue' }[status] || 'badge--gray'
 }
-// Dot colour class (keeps the existing status-icon dot)
+
 function statusDotMod(status) {
     return { attended: 'dot--green', skipped: 'dot--amber', called: 'dot--blue' }[status] || 'dot--gray'
 }
 
-
-// Keyboard shortcuts
-// Space  → call protocol progression (1st, 2nd, 3rd call) — never triggers no-show
-// Enter  → finish turn (always, any call state)
-// Esc    → no-show path exclusively (shows confirmation dialog if < 3 calls)
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
 function handleKey(e) {
-    // Overflow menu: Escape closes it first, before anything else
     if (showOverflow.value) {
         if (e.code === 'Escape') { e.preventDefault(); showOverflow.value = false }
         return
     }
-    // Cancel confirm dialog
+    if (showTransferDialog.value) {
+        if (e.code === 'Escape') { e.preventDefault(); showTransferDialog.value = false; selectedTransferCounterId.value = null }
+        if (e.code === 'Enter' && selectedTransferCounterId.value) { e.preventDefault(); confirmTransfer() }
+        return
+    }
     if (showCancelConfirm.value) {
         if (e.code === 'Escape') { e.preventDefault(); showCancelConfirm.value = false }
         if (e.code === 'Enter')  { e.preventDefault(); confirmCancelTurn() }
         return
     }
-    // No-show confirm dialog
     if (showNoShowConfirm.value) {
         if (e.code === 'Escape') { e.preventDefault(); showNoShowConfirm.value = false }
         if (e.code === 'Enter')  { e.preventDefault(); confirmNoShow() }
@@ -207,7 +229,6 @@ function handleKey(e) {
 }
 onMounted(() => window.addEventListener('keydown', handleKey))
 onUnmounted(() => window.removeEventListener('keydown', handleKey))
-
 </script>
 
 <template>
@@ -219,10 +240,13 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                 </div>
                 <div class="header-text">
                     <h1 class="hospital-name">Hospital Docente Universitario <br>Dr. Darío Contreras</h1>
-                    <p class="system-name">JM Sequence - Turns Sequence</p>
+                    <p class="system-name">{{ locale.t('agent.systemName') }}</p>
                 </div>
             </div>
-            <div class="header-username">Anne Hamilton</div>
+            <div class="header-user">
+                <span class="header-username">{{ auth.profile?.nombre ?? auth.user?.email }}</span>
+                <button class="btn-logout" @click="logout">{{ locale.t('common.logout') }}</button>
+            </div>
         </header>
 
         <section class="boh-content">
@@ -231,10 +255,9 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                 <div class="cta-group">
                 <div class="info">
                     <div class="info-header">
-                        <div class="counter-id">COUNTER <strong>{{ store.agentCounterId }}</strong></div>
+                        <div class="counter-id">{{ locale.t('agent.counter') }} <strong>{{ store.agentCounterId }}</strong></div>
                         <div class="services">
-                            <span v-for="svc in counterServices" :key="svc" class="boh-badge boh-badge--blue">{{ svc
-                            }}</span>
+                            <span v-for="svc in counterServices" :key="svc" class="boh-badge boh-badge--blue">{{ svc }}</span>
                         </div>
                     </div>
                     <time class="time">{{ currentTime }}</time>
@@ -253,7 +276,6 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                     @click="handleCtaClick"
                     @keydown.space.prevent="handleCtaClick"
                 >
-                    <!-- Countdown ring — visible only during 30s cooldown -->
                     <svg v-if="isInCooldown" class="countdown-ring" viewBox="0 0 120 120" aria-hidden="true">
                         <circle class="ring-track"    cx="60" cy="60" r="54" />
                         <circle class="ring-progress" cx="60" cy="60" r="54"
@@ -263,24 +285,24 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                     <div class="next-btn_container">
                         <span class="cta">{{ ctaLabel }}</span>
 
-                        <!-- Cooldown sub-label: countdown seconds (Syne monospaced) -->
                         <span v-if="isInCooldown" class="cta-countdown">
-                            Available in {{ cooldownRemaining }}s
+                            {{ locale.t('agent.availableIn') }} {{ cooldownRemaining }}s
                         </span>
 
-                        <!-- Normal sub-info: queue stats + next turn preview (idle state) -->
                         <div v-else-if="!store.activeTurn" class="status-container">
                             <div class="status">
                                 <span class="btn_waiting">
-                                    {{ store.stats.waiting }} turn{{ store.stats.waiting !== 1 ? 's' : '' }} waiting
+                                    {{ store.stats.waiting }}
+                                    {{ store.stats.waiting !== 1 ? locale.t('agent.turnPlural') : locale.t('agent.turnSingular') }}
+                                    {{ locale.t('agent.waiting') }}
                                 </span>
                             </div>
                             <div class="next-details" v-if="store.nextTurn">
-                                <span class="next-label">NEXT:</span>
+                                <span class="next-label">{{ locale.t('agent.next') }}</span>
                                 <span class="next-info">
                                     {{ store.nextTurn.id }} · {{ store.nextTurn.serviceLabel }}
                                     <span v-if="store.nextTurn?.priority === 'special'" class="boh-priority-tag">
-                                        ★ Special</span>
+                                        {{ locale.t('agent.special') }}</span>
                                 </span>
                             </div>
                         </div>
@@ -290,9 +312,8 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                     <kbd class="btn-kbd" v-else-if="!isInCooldown && callCount < 3">(Space)</kbd>
                 </div>
 
-                <!-- Call indicator: "Call 2 of 3 · 10:14 AM" -->
                 <p v-if="store.activeTurn" class="call-indicator">
-                    Call {{ callCount }} of 3
+                    {{ locale.t('agent.callOf') }} {{ callCount }} {{ locale.t('agent.of') }} 3
                     <span v-if="lastCallTime" class="call-time"> · {{ lastCallTime }}</span>
                 </p>
 
@@ -300,54 +321,52 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
 
                 <div class="turn-summary" v-if="store.activeTurn">
                     <div class="active-turn">
-                        <div class="status-title"><span>ACTIVE TURN</span>
+                        <div class="status-title"><span>{{ locale.t('agent.activeTurn') }}</span>
                             <span class="boh-priority-badge" v-if="store.activeTurn.priority === 'special'">
-                                ★ Special Priority</span>
+                                {{ locale.t('agent.specialPriority') }}</span>
                         </div>
                         <b class="turn">{{ store.activeTurn.id }}</b>
                     </div>
-                    <div class="summary-divider">
-                    </div>
+                    <div class="summary-divider"></div>
                     <div class="info-container">
                         <div class="name-info">
-                            <div class="status-title">Name:</div>
+                            <div class="status-title">{{ locale.t('agent.name') }}</div>
                             <div class="name-value">{{ store.activeTurn.patientName || '—' }}</div>
                         </div>
                         <div class="name-info">
-                            <div class="status-title">ID Number:</div>
+                            <div class="status-title">{{ locale.t('agent.idNumber') }}</div>
                             <div class="name-value">{{ store.activeTurn.idNumber || '—' }}</div>
                         </div>
                         <div class="name-info">
-                            <div class="status-title">Special condition:</div>
+                            <div class="status-title">{{ locale.t('agent.specialCondition') }}</div>
                             <div class="condition-value">{{ store.activeTurn.specialCondition }}</div>
                         </div>
                         <div class="timing-info">
                             <div class="called-info">
-                                <div class="status-title">Called at:</div>
+                                <div class="status-title">{{ locale.t('agent.calledAt') }}</div>
                                 <span class="called-value called-time">
                                     {{ store.activeTurn.calledAt
-                                        ? new Date(store.activeTurn.calledAt).toLocaleTimeString('es-DO', {
+                                        ? new Date(store.activeTurn.calledAt).toLocaleTimeString(locale.t('common.dateLocale'), {
                                             hour: '2-digit',
                                             minute: '2-digit', second: '2-digit', hour12: true
                                         }) : '—' }}
                                 </span>
                             </div>
                             <div class="called-info">
-                                <div class="status-title">Time elapsed</div>
+                                <div class="status-title">{{ locale.t('agent.timeElapsed') }}</div>
                                 <span class="called-value time-elapsed">{{ elapsedDisplay }}</span>
                             </div>
                         </div>
                     </div>
 
                     <div class="actions">
-                        <button class="end-turn-button" @click="store.finishTurn()">End turn
+                        <button class="end-turn-button" @click="store.finishTurn()">{{ locale.t('agent.endTurn') }}
                             <kbd class="btn-kbd">(Enter)</kbd>
                         </button>
                         <button class="mark-no-show-button" @click="showNoShowConfirm = true">
-                            No Show <kbd class="btn-kbd">(Esc)</kbd>
+                            {{ locale.t('agent.noShow') }} <kbd class="btn-kbd">(Esc)</kbd>
                         </button>
 
-                        <!-- ··· Overflow: exceptional actions (Defer / Cancel) -->
                         <div class="overflow-wrap" @click.stop>
                             <button
                                 class="btn-overflow"
@@ -363,7 +382,14 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                                     role="menuitem"
                                     @click="store.suspendTurn(); showOverflow = false"
                                 >
-                                    Defer turn
+                                    {{ locale.t('agent.deferTurn') }}
+                                </button>
+                                <button
+                                    class="overflow-menu__item overflow-menu__item--transfer"
+                                    role="menuitem"
+                                    @click="showOverflow = false; showTransferDialog = true"
+                                >
+                                    {{ locale.t('agent.transferTurn') }}
                                 </button>
                                 <button
                                     class="overflow-menu__item overflow-menu__item--cancel"
@@ -374,7 +400,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                                         <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Z" fill="currentColor"/>
                                         <path d="M7 4h2v5H7V4Zm0 6h2v2H7v-2Z" fill="currentColor"/>
                                     </svg>
-                                    Cancel turn
+                                    {{ locale.t('agent.cancelTurn') }}
                                 </button>
                             </div>
                         </div>
@@ -384,27 +410,27 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
 
             <div class="side-panel">
                 <div class="insights">
-                    <div class="insight-title">TODAY'S INSIGHTS</div>
+                    <div class="insight-title">{{ locale.t('agent.insights') }}</div>
                     <div class="insights-container">
                         <div class="data">
-                            <div class="turns-called-label">TURNS <br>CALLED</div>
+                            <div class="turns-called-label">{{ locale.t('agent.turnsCalled') }}</div>
                             <span class="turns-called-value">{{ store.stats.called }}</span>
                         </div>
                         <div class="data">
-                            <div class="turns-called-label">TURNS <br>ATTENDED</div>
+                            <div class="turns-called-label">{{ locale.t('agent.turnsAttended') }}</div>
                             <span class="turns-called-value">{{ store.stats.attended }}</span>
                         </div>
                         <div class="data">
-                            <div class="turns-called-label">NO <br>SHOW</div>
+                            <div class="turns-called-label">{{ locale.t('agent.noShowLabel') }}</div>
                             <span class="turns-called-value">{{ store.stats.skipped }}</span>
                         </div>
                     </div>
                 </div>
                 <div class="history">
                     <div class="history-container">
-                        <div class="history-title">HISTORY</div>
+                        <div class="history-title">{{ locale.t('agent.history') }}</div>
                         <div class="entries-container">
-                            <div v-if="historyItems.length === 0" class="boh-history_empty">No history yet</div>
+                            <div v-if="historyItems.length === 0" class="boh-history_empty">{{ locale.t('agent.noHistory') }}</div>
                             <div v-for="turn in historyItems" :key="turn.id + turn.status"
                                 class="boh-history_item entry">
                                 <div class="entry_left">
@@ -413,7 +439,9 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                                 </div>
 
                                 <div class="entry_center">
-                                    <span class="entry_service">{{ turn.serviceLabel }}</span>
+                                    <span class="entry_service">
+                                        {{ turn.serviceLabel }}
+                                    </span>
                                     <span class="entry_sep">—</span>
                                     <span class="entry_duration">{{ formatHistoryDuration(turn) }}</span>
                                 </div>
@@ -422,7 +450,6 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                                     {{ statusLabel(turn.status) }}
                                 </span>
 
-                                <!-- Reinstate: patient arrived after no-show -->
                                 <button
                                     v-if="turn.status === 'skipped'"
                                     class="btn-reinstate"
@@ -441,20 +468,19 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
     <Teleport to="body">
         <div v-if="showCancelConfirm" class="confirm-overlay" @click.self="showCancelConfirm = false">
             <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-confirm-title">
-                <p class="confirm-title" id="cancel-confirm-title">Cancel this turn?</p>
+                <p class="confirm-title" id="cancel-confirm-title">{{ locale.t('agent.cancelTitle') }}</p>
                 <p class="confirm-body">
-                    Turn <strong>{{ store.activeTurn?.id }}</strong> will be permanently removed.
-                    This cannot be undone.
+                    {{ locale.t('agent.cancelBody1') }} <strong>{{ store.activeTurn?.id }}</strong> {{ locale.t('agent.cancelBody2') }}
                 </p>
                 <div class="confirm-actions">
                     <button class="btn-confirm-danger btn-confirm-danger--red" @click="confirmCancelTurn">
-                        Yes, cancel turn
+                        {{ locale.t('agent.cancelYes') }}
                     </button>
                     <button class="btn-confirm-cancel" @click="showCancelConfirm = false">
-                        Go back
+                        {{ locale.t('common.goBack') }}
                     </button>
                 </div>
-                <p class="confirm-hint">Enter to confirm · Esc to go back</p>
+                <p class="confirm-hint">{{ locale.t('agent.confirmHintCancel') }}</p>
             </div>
         </div>
     </Teleport>
@@ -463,25 +489,63 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
     <Teleport to="body">
         <div v-if="showNoShowConfirm" class="confirm-overlay" @click.self="showNoShowConfirm = false">
             <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-                <p class="confirm-title" id="confirm-title">Mark as No Show?</p>
+                <p class="confirm-title" id="confirm-title">{{ locale.t('agent.noShowTitle') }}</p>
                 <p class="confirm-body">
                     <span v-if="callCount < 3">
-                        Protocol not complete ({{ callCount }} of 3 calls made).
+                        {{ locale.t('agent.noShowProtocol') }} ({{ callCount }} {{ locale.t('agent.of') }} 3 {{ locale.t('agent.noShowCalls') }}).
                     </span>
                     <span v-else>
-                        3 calls completed.
+                        {{ locale.t('agent.noShowComplete') }}
                     </span>
-                    This will be recorded in the audit log.
+                    {{ locale.t('agent.noShowAudit') }}
                 </p>
                 <div class="confirm-actions">
                     <button class="btn-confirm-danger" @click="confirmNoShow">
-                        Confirm No Show
+                        {{ locale.t('agent.confirmNoShow') }}
                     </button>
                     <button class="btn-confirm-cancel" @click="showNoShowConfirm = false">
-                        Cancel
+                        {{ locale.t('common.cancel') }}
                     </button>
                 </div>
-                <p class="confirm-hint">Enter to confirm · Esc to cancel</p>
+                <p class="confirm-hint">{{ locale.t('agent.confirmHintNoShow') }}</p>
+            </div>
+        </div>
+    </Teleport>
+
+    <!-- ── Transfer Turn Dialog ───────────────────────────────────────────── -->
+    <Teleport to="body">
+        <div v-if="showTransferDialog" class="confirm-overlay" @click.self="showTransferDialog = false; selectedTransferCounterId = null">
+            <div class="confirm-dialog confirm-dialog--wide" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
+                <p class="confirm-title" id="transfer-title">{{ locale.t('agent.transferTitle') }}</p>
+                <p class="confirm-body">{{ locale.t('agent.transferBody') }}</p>
+                <div class="transfer-counter-list">
+                    <button
+                        v-for="counter in transferableCounters"
+                        :key="counter.id"
+                        class="transfer-counter-option"
+                        :class="{ 'transfer-counter-option--selected': selectedTransferCounterId === counter.id }"
+                        @click="selectedTransferCounterId = counter.id"
+                    >
+                        <span class="transfer-counter-label">{{ counter.label }}</span>
+                        <span v-if="counter.currentTurnId" class="transfer-busy-badge">{{ locale.t('agent.transferBusy') }}</span>
+                    </button>
+                    <p v-if="transferableCounters.length === 0" class="transfer-empty">
+                        No hay otras ventanillas activas disponibles.
+                    </p>
+                </div>
+                <div class="confirm-actions">
+                    <button
+                        class="btn-confirm-danger btn-confirm-danger--blue"
+                        :disabled="!selectedTransferCounterId"
+                        @click="confirmTransfer"
+                    >
+                        {{ locale.t('agent.transferConfirm') }}
+                    </button>
+                    <button class="btn-confirm-cancel" @click="showTransferDialog = false; selectedTransferCounterId = null">
+                        {{ locale.t('common.cancel') }}
+                    </button>
+                </div>
+                <p class="confirm-hint">{{ locale.t('agent.transferHint') }}</p>
             </div>
         </div>
     </Teleport>
@@ -554,12 +618,37 @@ p {
     color: rgba(238, 243, 255, 0.6);
 }
 
+.header-user {
+    display: flex;
+    align-items: center;
+    gap: clamp(10px, 1.2vw, 16px);
+    flex-shrink: 0;
+}
+
 .header-username {
     font-family: 'Figtree', sans-serif;
     font-weight: 600;
-    font-size: clamp(16px, 1.5vw, 24px);
+    font-size: clamp(14px, 1.3vw, 20px);
     color: #EEF3FF;
     white-space: nowrap;
+}
+
+.btn-logout {
+    font-family: 'Figtree', sans-serif;
+    font-size: clamp(12px, 1vw, 14px);
+    font-weight: 500;
+    color: rgba(238, 243, 255, 0.55);
+    background: transparent;
+    border: 1px solid rgba(238, 243, 255, 0.20);
+    border-radius: 6px;
+    padding: 5px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+}
+.btn-logout:hover {
+    color: #EEF3FF;
+    border-color: rgba(238, 243, 255, 0.45);
 }
 
 .logo-image {
@@ -956,6 +1045,12 @@ p {
     color: #111827;
 }
 
+.overflow-menu__item--transfer { color: #1A72FF; }
+.overflow-menu__item--transfer:hover {
+    background: rgba(26, 114, 255, 0.08);
+    color: #0E3FA3;
+}
+
 .overflow-menu__item--cancel { color: #DC2626; }
 .overflow-menu__item--cancel:hover {
     background: rgba(220, 38, 38, 0.08);
@@ -1075,19 +1170,12 @@ p {
     scrollbar-color: rgba(238, 243, 255, 0.18) transparent;
 }
 
-.entries-container::-webkit-scrollbar {
-    width: 4px;
-}
-
-.entries-container::-webkit-scrollbar-track {
-    background: transparent;
-}
-
+.entries-container::-webkit-scrollbar { width: 4px; }
+.entries-container::-webkit-scrollbar-track { background: transparent; }
 .entries-container::-webkit-scrollbar-thumb {
     background-color: rgba(238, 243, 255, 0.18);
     border-radius: 9999px;
 }
-
 .entries-container::-webkit-scrollbar-thumb:hover {
     background-color: rgba(26, 114, 255, 0.55);
 }
@@ -1118,21 +1206,10 @@ p {
     flex-shrink: 0;
 }
 
-.dot--green {
-    background-color: #20CB8B;
-}
-
-.dot--amber {
-    background-color: #F0A429;
-}
-
-.dot--blue {
-    background-color: #4D93FF;
-}
-
-.dot--gray {
-    background-color: #6B7280;
-}
+.dot--green { background-color: #20CB8B; }
+.dot--amber { background-color: #F0A429; }
+.dot--blue  { background-color: #4D93FF; }
+.dot--gray  { background-color: #6B7280; }
 
 .entry__code {
     font-family: 'Syne', sans-serif;
@@ -1172,9 +1249,7 @@ p {
     flex-shrink: 0;
 }
 
-.entry_badge {
-    flex-shrink: 0;
-}
+.entry_badge { flex-shrink: 0; }
 
 .boh-badge {
     font-family: 'Figtree', sans-serif;
@@ -1186,37 +1261,10 @@ p {
     white-space: nowrap;
 }
 
-.boh-call-btn--disabled {
-    background: #4B5563;
-    box-shadow: 0 8px 32px rgba(16, 38, 185, 0.25);
-    cursor: default;
-    min-height: clamp(48px, 8vh, 96px);
-}
-
-.boh-badge--sm {
-    font-size: 8px;
-    padding: 2px 7px;
-}
-
-.boh-badge--blue {
-    background-color: rgba(26, 114, 255, 0.17);
-    color: #0E3FA3;
-}
-
-.boh-badge--green {
-    background-color: rgba(32, 203, 139, 0.17);
-    color: #065F46;
-}
-
-.boh-badge--amber {
-    background-color: rgba(245, 158, 11, 0.17);
-    color: #92400E;
-}
-
-.boh-badge--gray {
-    background-color: rgba(238, 243, 255, 0.17);
-    color: #949494;
-}
+.boh-badge--blue  { background-color: rgba(26, 114, 255, 0.17); color: #0E3FA3; }
+.boh-badge--green { background-color: rgba(32, 203, 139, 0.17); color: #065F46; }
+.boh-badge--amber { background-color: rgba(245, 158, 11, 0.17);  color: #92400E; }
+.boh-badge--gray  { background-color: rgba(238, 243, 255, 0.17); color: #949494; }
 
 .boh-priority-tag {
     font-size: 12px;
@@ -1246,115 +1294,33 @@ p {
 }
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */
-
-/* Intermediate: tighten side panel below 1100px */
 @media (max-width: 1100px) {
-    .side-panel {
-        width: clamp(180px, 22vw, 240px);
-    }
-    .turns-called-value {
-        font-size: clamp(24px, 3vw, 48px);
-    }
-    .insight-title {
-        font-size: clamp(14px, 1.5vw, 20px);
-    }
+    .side-panel { width: clamp(180px, 22vw, 240px); }
+    .turns-called-value { font-size: clamp(24px, 3vw, 48px); }
+    .insight-title { font-size: clamp(14px, 1.5vw, 20px); }
 }
 
-/* Tablet: stack layout vertically at 768px width */
 @media (max-width: 768px) {
-    .boh-content {
-        flex-direction: column;
-        overflow-y: auto;
-    }
-
-    .main-screen {
-        flex: none;
-        min-height: 480px;
-        justify-content: flex-start;
-        padding: 24px 0;
-        gap: 16px;
-        overflow: visible;
-    }
-
-    .side-panel {
-        width: 100%;
-        flex-direction: row;
-        flex-shrink: 0;
-        min-height: 0;
-        border-top: 2px solid rgba(238, 243, 255, 0.12);
-    }
-
-    .insights {
-        flex: 1;
-        border-bottom: none;
-        border-right: 2px solid #EEF3FF;
-        padding: 16px;
-    }
-
-    .insights-container {
-        flex-direction: row;
-        justify-content: space-around;
-        flex-wrap: wrap;
-        gap: 12px;
-    }
-
-    .data {
-        flex-direction: column;
-        align-items: center;
-        gap: 4px;
-        flex: 1;
-        min-width: 60px;
-        text-align: center;
-    }
-
-    .turns-called-label {
-        text-align: center;
-    }
-
-    .turns-called-value {
-        font-size: clamp(24px, 6vw, 40px);
-    }
-
-    .history {
-        flex: 1.5;
-        min-height: 0;
-        max-height: 220px;
-    }
-
-    .next-btn {
-        width: min(400px, 90%);
-        min-height: clamp(100px, 18vh, 180px);
-    }
-
-    .active-turn {
-        flex-wrap: wrap;
-    }
+    .boh-content { flex-direction: column; overflow-y: auto; }
+    .main-screen { flex: none; min-height: 480px; justify-content: flex-start; padding: 24px 0; gap: 16px; overflow: visible; }
+    .side-panel { width: 100%; flex-direction: row; flex-shrink: 0; min-height: 0; border-top: 2px solid rgba(238, 243, 255, 0.12); }
+    .insights { flex: 1; border-bottom: none; border-right: 2px solid #EEF3FF; padding: 16px; }
+    .insights-container { flex-direction: row; justify-content: space-around; flex-wrap: wrap; gap: 12px; }
+    .data { flex-direction: column; align-items: center; gap: 4px; flex: 1; min-width: 60px; text-align: center; }
+    .turns-called-label { text-align: center; }
+    .turns-called-value { font-size: clamp(24px, 6vw, 40px); }
+    .history { flex: 1.5; min-height: 0; max-height: 220px; }
+    .next-btn { width: min(400px, 90%); min-height: clamp(100px, 18vh, 180px); }
+    .active-turn { flex-wrap: wrap; }
 }
 
 /* ── 3-Call Protocol ────────────────────────────────────────────────────── */
+.next-btn--destructive { background-color: #F0A429 !important; color: #111827 !important; }
+.next-btn--destructive:hover { background-color: #D4901F !important; }
+.next-btn--destructive .ring-progress { stroke: #92400E; }
+.next-btn--disabled { opacity: 0.6; cursor: not-allowed; }
 
-/* Destructive state (call-3 → Mark No Show) */
-.next-btn--destructive {
-    background-color: #F0A429 !important;
-    color: #111827 !important;
-}
-.next-btn--destructive:hover {
-    background-color: #D4901F !important;
-}
-.next-btn--destructive .ring-progress {
-    stroke: #92400E;
-}
-
-/* Cooldown disabled state */
-.next-btn--disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-/* SVG countdown ring — positioned absolutely over/around the button */
-.next-btn {
-    position: relative;
-}
+.next-btn { position: relative; }
 .countdown-ring {
     position: absolute;
     inset: -10px;
@@ -1363,11 +1329,7 @@ p {
     pointer-events: none;
     border-radius: inherit;
 }
-.ring-track {
-    fill: none;
-    stroke: rgba(255, 255, 255, 0.15);
-    stroke-width: 5;
-}
+.ring-track { fill: none; stroke: rgba(255, 255, 255, 0.15); stroke-width: 5; }
 .ring-progress {
     fill: none;
     stroke: rgba(255, 255, 255, 0.7);
@@ -1379,7 +1341,6 @@ p {
     transition: stroke-dashoffset 1s linear;
 }
 
-/* Countdown seconds label inside the CTA */
 .cta-countdown {
     display: block;
     font-family: 'Syne', sans-serif;
@@ -1389,7 +1350,6 @@ p {
     margin-top: 4px;
 }
 
-/* Call indicator: "Call 2 of 3 · 10:14 AM" */
 .call-indicator {
     font-family: 'Figtree', sans-serif;
     font-size: clamp(12px, 1.1vw, 14px);
@@ -1397,13 +1357,8 @@ p {
     margin: 0;
     text-align: center;
 }
-.call-time {
-    font-family: 'Syne', sans-serif;
-    font-weight: 600;
-}
+.call-time { font-family: 'Syne', sans-serif; font-weight: 600; }
 
-
-/* Reinstate button in history (↩) */
 .btn-reinstate {
     flex-shrink: 0;
     background: rgba(26, 114, 255, 0.12);
@@ -1421,11 +1376,9 @@ p {
     transition: background-color 0.15s;
     line-height: 1;
 }
-.btn-reinstate:hover {
-    background: rgba(26, 114, 255, 0.22);
-}
+.btn-reinstate:hover { background: rgba(26, 114, 255, 0.22); }
 
-/* ── No-Show Confirmation Dialog ────────────────────────────────────────── */
+/* ── Dialogs ────────────────────────────────────────────────────────────── */
 .confirm-overlay {
     position: fixed;
     inset: 0;
@@ -1459,11 +1412,7 @@ p {
     margin: 0 0 24px;
     line-height: 1.5;
 }
-.confirm-actions {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-}
+.confirm-actions { display: flex; gap: 12px; justify-content: center; }
 .btn-confirm-danger {
     font-family: 'Figtree', sans-serif;
     font-weight: 600;
@@ -1479,6 +1428,10 @@ p {
 .btn-confirm-danger:hover { background: #D4901F; }
 .btn-confirm-danger--red { background: #DC2626; color: #FFFFFF; }
 .btn-confirm-danger--red:hover { background: #B91C1C; }
+.btn-confirm-danger--blue { background: #1A72FF; color: #FFFFFF; }
+.btn-confirm-danger--blue:hover { background: #0E3FA3; }
+.btn-confirm-danger--blue:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-confirm-danger--blue:disabled:hover { background: #1A72FF; }
 .btn-confirm-cancel {
     font-family: 'Figtree', sans-serif;
     font-weight: 500;
@@ -1499,57 +1452,79 @@ p {
     margin: 16px 0 0;
 }
 
-/* Mobile: aggressively scale at 480px */
+/* ── Transfer dialog ────────────────────────────────────────────────────── */
+.confirm-dialog--wide { max-width: 480px; }
+
+.transfer-counter-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 24px;
+    max-height: 240px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(17, 24, 39, 0.15) transparent;
+}
+
+.transfer-counter-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 2px solid rgba(17, 24, 39, 0.12);
+    background: transparent;
+    cursor: pointer;
+    font-family: 'Figtree', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    color: #111827;
+    text-align: left;
+    transition: border-color 0.12s, background-color 0.12s;
+}
+.transfer-counter-option:hover {
+    border-color: rgba(26, 114, 255, 0.4);
+    background: rgba(26, 114, 255, 0.04);
+}
+.transfer-counter-option--selected {
+    border-color: #1A72FF;
+    background: rgba(26, 114, 255, 0.08);
+    color: #0E3FA3;
+}
+
+.transfer-counter-label { flex: 1; }
+
+.transfer-busy-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: #92400E;
+    background: rgba(245, 158, 11, 0.15);
+    border-radius: 9999px;
+    padding: 2px 8px;
+    flex-shrink: 0;
+}
+
+.transfer-empty {
+    font-family: 'Figtree', sans-serif;
+    font-size: 13px;
+    color: #9CA3AF;
+    font-style: italic;
+    text-align: center;
+    margin: 8px 0;
+}
+
+/* Mobile */
 @media (max-width: 480px) {
-    header {
-        padding: 12px 16px;
-    }
-
-    h1 {
-        font-size: 13px;
-        line-height: 1.2;
-    }
-
-    .system-name {
-        font-size: 11px;
-    }
-
-    .logo-image {
-        width: 40px;
-        height: 40px;
-    }
-
-    .side-panel {
-        flex-direction: column;
-    }
-
-    .insights {
-        border-right: none;
-        border-bottom: 2px solid #EEF3FF;
-    }
-
-    .history {
-        max-height: 180px;
-    }
-
-    .next-btn {
-        width: 95%;
-        min-height: 120px;
-    }
-
-    .cta {
-        font-size: 20px;
-    }
-
-    .info-container {
-        flex-direction: column;
-        align-items: flex-start;
-        width: 90%;
-        gap: 12px;
-    }
-
-    .timing-info {
-        gap: 12px;
-    }
+    header { padding: 12px 16px; }
+    h1 { font-size: 13px; line-height: 1.2; }
+    .system-name { font-size: 11px; }
+    .logo-image { width: 40px; height: 40px; }
+    .side-panel { flex-direction: column; }
+    .insights { border-right: none; border-bottom: 2px solid #EEF3FF; }
+    .history { max-height: 180px; }
+    .next-btn { width: 95%; min-height: 120px; }
+    .cta { font-size: 20px; }
+    .info-container { flex-direction: column; align-items: flex-start; width: 90%; gap: 12px; }
+    .timing-info { gap: 12px; }
 }
 </style>

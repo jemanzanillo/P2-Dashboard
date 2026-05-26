@@ -9,7 +9,7 @@
           <path d="M32 16c2.67 2.67 4 5.83 4 9s-1.33 6.33-4 9" stroke="#1A72FF" stroke-width="2.5" stroke-linecap="round"/>
           <path d="M37 11c4 4 6 8.67 6 13s-2 9-6 13" stroke="#1A72FF" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.5"/>
         </svg>
-        <p class="audio-overlay-text">Toque la pantalla para activar el audio</p>
+        <p class="audio-overlay-text">{{ locale.t('foh.audioPrompt') }}</p>
       </div>
     </div>
 
@@ -23,7 +23,7 @@
         />
         <div class="header-text">
           <h1 class="hospital-name">Hospital Docente Universitario Dr. Darío Contreras</h1>
-          <p class="header-subtitle">JM Sequence - Turns Sequence</p>
+          <p class="header-subtitle">{{ locale.t('foh.systemName') }}</p>
         </div>
       </div>
       <time class="header-clock">{{ currentTime }}</time>
@@ -40,14 +40,14 @@
 
         <!-- Counters carousel -->
         <section class="counters-section">
-          <h2 class="section-title">Counters</h2>
+          <h2 class="section-title">{{ locale.t('foh.counters') }}</h2>
           <div class="counters-row">
             <div
               v-for="counter in store.counters"
               :key="counter.id"
               class="counter-card"
             >
-              <span class="counter-label">Station {{ counter.id }}</span>
+              <span class="counter-label">{{ locale.t('foh.station') }} {{ counter.id }}</span>
               <span class="counter-turn">{{ counter.currentTurnId || '—' }}</span>
             </div>
           </div>
@@ -59,11 +59,11 @@
 
         <!-- Active turn panel -->
         <section class="active-section">
-          <h2 class="section-title">Turn call</h2>
+          <h2 class="section-title">{{ locale.t('foh.activeCall') }}</h2>
 
           <div v-if="lastCalledTurn" class="active-display">
             <div class="active-turn-col">
-              <span class="active-label">Turn</span>
+              <span class="active-label">{{ locale.t('foh.turn') }}</span>
               <span class="active-number">{{ lastCalledTurn.id }}</span>
               <span class="active-service">{{ lastCalledTurn.serviceLabel }}</span>
             </div>
@@ -76,19 +76,19 @@
             </div>
 
             <div class="active-station-col">
-              <span class="active-label">Station</span>
+              <span class="active-label">{{ locale.t('foh.station2') }}</span>
               <span class="active-number">{{ activeCounterId }}</span>
             </div>
           </div>
 
           <div v-else class="active-idle">
-            <span>No active turn</span>
+            <span>{{ locale.t('foh.noActiveTurn') }}</span>
           </div>
         </section>
 
         <!-- History panel -->
         <section class="history-section">
-          <h2 class="section-title">Last turns</h2>
+          <h2 class="section-title">{{ locale.t('foh.lastTurns') }}</h2>
           <div class="history-list">
             <div
               v-for="turn in displayHistory"
@@ -119,11 +119,9 @@
       <div class="footer-badge">JM Sequence</div>
       <div class="ticker-wrapper">
         <p class="ticker-text">
-          Welcome to Hospital Docente Universitario Dr. Darío Contreras.
-          Please take a ticket and wait for your turn to be called.
+          {{ locale.t('foh.ticker') }}
           &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-          Welcome to Hospital Docente Universitario Dr. Darío Contreras.
-          Please take a ticket and wait for your turn to be called.
+          {{ locale.t('foh.ticker') }}
         </p>
       </div>
     </footer>
@@ -135,8 +133,10 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useQueueStore } from '@/queue'
 import { useTurnAnnouncer } from '@/composables/useTurnAnnouncer'
+import { useLocaleStore } from '@/locale.js'
 
-const store = useQueueStore()
+const store  = useQueueStore()
+const locale = useLocaleStore()
 const { announce, audioReady, requestAudioPermission } = useTurnAnnouncer()
 
 // Guard: skip announcing the turn that was already active when the page loads
@@ -203,7 +203,12 @@ function dotClass(status) {
 }
 
 function statusLabel(status) {
-  return { attended: 'Attended', skipped: 'No Show', called: 'Called' }[status] || status
+  const map = {
+    attended: 'common.status.attended',
+    skipped:  'common.status.noshow',
+    called:   'common.status.called',
+  }
+  return locale.t(map[status] ?? status)
 }
 
 function badgeClass(status) {

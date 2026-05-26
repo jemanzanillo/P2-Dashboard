@@ -1,29 +1,31 @@
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useQueueStore } from '@/queue'
+import { useLocaleStore } from '@/locale.js'
 
-const store = useQueueStore()
+const store  = useQueueStore()
+const locale = useLocaleStore()
 
 // ── Step state machine ────────────────────────────────────────────────────────
 const step = ref('idle')          // idle | service | patient-data | confirm | success
 
 // ── Form state ────────────────────────────────────────────────────────────────
-const selectedService = ref(null)
-const patientName     = ref('')
-const idNumber        = ref('')
-const selectedConditions = ref([])  // array of condition IDs (English, matches store)
-const createdTurn     = ref(null)
+const selectedService    = ref(null)
+const patientName        = ref('')
+const idNumber           = ref('')
+const selectedConditions = ref([])
+const createdTurn        = ref(null)
 
 // ── Auto-reset countdown ──────────────────────────────────────────────────────
 const resetCountdown = ref(15)
 let resetTimer = null
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-const CONDITIONS = [
-  { id: 'Pregnancy',          label: 'Embarazo' },
-  { id: 'Elderly Age (65+)', label: 'Edad avanzada (65+)' },
-  { id: 'Disability',         label: 'Discapacidad' },
-]
+// ── Conditions (from DB via store) ───────────────────────────────────────────
+const CONDITIONS = computed(() =>
+  store.conditions.map(c => ({ id: c.id, label: c.nombre, icono: c.icono }))
+)
+
+onMounted(() => store.init())
 
 // ── Service icons (inline SVG paths) ─────────────────────────────────────────
 const SERVICE_ICONS = {
@@ -40,7 +42,7 @@ const SERVICE_ICONS = {
 // ── Computed ──────────────────────────────────────────────────────────────────
 const waitingByService = computed(() => {
   const map = {}
-  for (const s of store.SERVICES) {
+  for (const s of store.services) {
     map[s.id] = store.turns.filter(
       t => t.serviceID === s.id && (t.status === 'waiting' || t.status === 'deferred')
     ).length
@@ -50,18 +52,13 @@ const waitingByService = computed(() => {
 
 const activeCountersByService = computed(() => {
   const map = {}
-  for (const s of store.SERVICES) {
+  for (const s of store.services) {
     map[s.id] = store.counters.filter(
       c => c.serviceIDs.includes(s.id) && c.status === 'active'
     ).length
   }
   return map
 })
-
-
-const selectedConditionValue = computed(() =>
-  selectedConditions.value.length === 0 ? 'Normal' : selectedConditions.value[0]
-)
 
 const isPriority = computed(() => selectedConditions.value.length > 0)
 
@@ -72,8 +69,8 @@ const hasAnyData = computed(() =>
 )
 
 const rightBtnLabel = computed(() => {
-  if (step.value === 'patient-data') return hasAnyData.value ? 'Continuar' : 'Omitir'
-  return 'Continuar'
+  if (step.value === 'patient-data') return hasAnyData.value ? locale.t('common.continue') : locale.t('common.skip')
+  return locale.t('common.continue')
 })
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -90,15 +87,15 @@ function onServiceContinue() {
 function onPatientBack()    { goTo('service') }
 function onPatientContinue() { goTo('confirm') }
 
-function onConfirmBack()    { goTo('patient-data') }
-function onConfirmPrint() {
-  const turn = store.createTurn(
+function onConfirmBack() { goTo('patient-data') }
+async function onConfirmPrint() {
+  const turn = await store.createTurn(
     selectedService.value.id,
     patientName.value.trim() || '',
     idNumber.value.trim() || '',
-    selectedConditionValue.value,
+    selectedConditions.value,
   )
-  createdTurn.value = turn
+  createdTurn.value = { ...turn, serviceID: selectedService.value.id, serviceName: selectedService.value.nombre }
   goTo('success')
   startResetTimer()
 }
@@ -127,13 +124,13 @@ function startResetTimer() {
 function resetToIdle() {
   clearInterval(resetTimer)
   resetTimer = null
-  step.value           = 'idle'
+  step.value            = 'idle'
   selectedService.value = null
-  patientName.value    = ''
-  idNumber.value       = ''
+  patientName.value     = ''
+  idNumber.value        = ''
   selectedConditions.value = []
-  createdTurn.value    = null
-  resetCountdown.value = 15
+  createdTurn.value     = null
+  resetCountdown.value  = 15
 }
 
 onUnmounted(() => clearInterval(resetTimer))
@@ -156,8 +153,8 @@ const showHelp = ref(false)
             <path d="M28 14v28M14 28h28" stroke="#1A72FF" stroke-width="3.5" stroke-linecap="round"/>
           </svg>
         </div>
-        <h1 class="idle-title">Bienvenido</h1>
-        <p class="idle-sub">Toca aquí para crear tu turno</p>
+        <h1 class="idle-title">{{ locale.t('kiosk.welcome') }}</h1>
+        <p class="idle-sub">{{ locale.t('kiosk.tapToCreate') }}</p>
       </div>
     </div>
 
@@ -167,23 +164,23 @@ const showHelp = ref(false)
     <div v-else-if="step === 'service'" class="screen screen--service">
 
       <nav class="topnav">
-        <button class="btn-ghost" @click="onServiceBack">Inicio</button>
+        <button class="btn-ghost" @click="onServiceBack">{{ locale.t('common.home') }}</button>
         <button
           class="btn-primary"
           :disabled="!selectedService"
           @click="onServiceContinue"
-        >Continuar</button>
+        >{{ locale.t('common.continue') }}</button>
       </nav>
 
       <div class="screen-body">
         <header class="screen-header">
-          <h2 class="screen-title">Elige tu servicio</h2>
-          <p class="screen-sub">Selecciona el área de atención</p>
+          <h2 class="screen-title">{{ locale.t('kiosk.chooseService') }}</h2>
+          <p class="screen-sub">{{ locale.t('kiosk.selectArea') }}</p>
         </header>
 
         <div class="service-grid">
           <button
-            v-for="s in store.SERVICES"
+            v-for="s in store.services"
             :key="s.id"
             class="service-card"
             :class="{
@@ -201,17 +198,18 @@ const showHelp = ref(false)
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
                 :stroke="activeCountersByService[s.id] > 0 ? s.color : '#9CA3AF'"
                 stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                <path :d="SERVICE_ICONS[s.id]"/>
+                <path :d="SERVICE_ICONS[s.prefijo_turno]"/>
               </svg>
             </div>
-            <span class="service-name">{{ s.labelEs }}</span>
+            <span class="service-name">{{ s.nombre }}</span>
             <template v-if="activeCountersByService[s.id] > 0">
-              <span class="service-waiting">{{ waitingByService[s.id] }} en espera</span>
+              <span class="service-waiting">{{ waitingByService[s.id] }} {{ locale.t('kiosk.waiting') }}</span>
               <span class="service-counters">
-                {{ activeCountersByService[s.id] }} ventanilla{{ activeCountersByService[s.id] !== 1 ? 's' : '' }} activa{{ activeCountersByService[s.id] !== 1 ? 's' : '' }}
+                {{ activeCountersByService[s.id] }}
+                {{ activeCountersByService[s.id] !== 1 ? locale.t('kiosk.counterPlural') : locale.t('kiosk.counterSingular') }}
               </span>
             </template>
-            <span v-else class="service-unavailable-badge">No disponible</span>
+            <span v-else class="service-unavailable-badge">{{ locale.t('kiosk.unavailable') }}</span>
           </button>
         </div>
 
@@ -220,7 +218,7 @@ const showHelp = ref(false)
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/>
             </svg>
-            Necesito ayuda
+            {{ locale.t('kiosk.needHelp') }}
           </button>
         </div>
       </div>
@@ -232,20 +230,20 @@ const showHelp = ref(false)
     <div v-else-if="step === 'patient-data'" class="screen screen--data">
 
       <nav class="topnav">
-        <button class="btn-ghost" @click="onPatientBack">Atrás</button>
+        <button class="btn-ghost" @click="onPatientBack">{{ locale.t('common.back') }}</button>
         <button class="btn-primary" @click="onPatientContinue">{{ rightBtnLabel }}</button>
       </nav>
 
       <div class="screen-body screen-body--data">
         <header class="screen-header">
-          <h2 class="screen-title">Información opcional</h2>
-          <p class="screen-sub">Ayuda a optimizar la atención — puede omitirse</p>
+          <h2 class="screen-title">{{ locale.t('kiosk.optionalInfo') }}</h2>
+          <p class="screen-sub">{{ locale.t('kiosk.optionalSub') }}</p>
         </header>
 
         <div class="form-stack">
 
           <div class="form-field" :class="{ 'form-field--active': patientName }">
-            <label class="form-label">Nombre completo</label>
+            <label class="form-label">{{ locale.t('kiosk.fullName') }}</label>
             <input
               v-model="patientName"
               class="form-input"
@@ -256,7 +254,7 @@ const showHelp = ref(false)
           </div>
 
           <div class="form-field" :class="{ 'form-field--active': idNumber }">
-            <label class="form-label">Cédula / Pasaporte</label>
+            <label class="form-label">{{ locale.t('kiosk.idPassport') }}</label>
             <input
               v-model="idNumber"
               class="form-input"
@@ -267,7 +265,7 @@ const showHelp = ref(false)
           </div>
 
           <div class="form-field">
-            <label class="form-label">Condiciones especiales</label>
+            <label class="form-label">{{ locale.t('kiosk.specialConditions') }}</label>
             <div class="chip-row">
               <button
                 v-for="c in CONDITIONS"
@@ -282,7 +280,7 @@ const showHelp = ref(false)
         </div>
       </div>
 
-      <footer class="kiosk-footer">© 2026 JM Sequence</footer>
+      <footer class="kiosk-footer">{{ locale.t('kiosk.footer') }}</footer>
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════════════ -->
@@ -291,51 +289,54 @@ const showHelp = ref(false)
     <div v-else-if="step === 'confirm'" class="screen screen--confirm">
 
       <nav class="topnav">
-        <button class="btn-ghost" @click="onConfirmBack">Atrás</button>
-        <button class="btn-primary btn-primary--green" @click="onConfirmPrint">Imprimir</button>
+        <button class="btn-ghost" @click="onConfirmBack">{{ locale.t('common.back') }}</button>
+        <button class="btn-primary btn-primary--green" @click="onConfirmPrint">{{ locale.t('common.print') }}</button>
       </nav>
 
       <div class="screen-body screen-body--center">
         <header class="screen-header">
-          <h2 class="screen-title">Confirma tu turno</h2>
-          <p class="screen-sub">Verifica que la información sea correcta</p>
+          <h2 class="screen-title">{{ locale.t('kiosk.confirmTitle') }}</h2>
+          <p class="screen-sub">{{ locale.t('kiosk.confirmSub') }}</p>
         </header>
 
         <div class="summary-card">
           <div class="summary-row">
-            <span class="summary-label">Servicio solicitado</span>
-            <span class="summary-value">{{ selectedService?.labelEs }}</span>
+            <span class="summary-label">{{ locale.t('kiosk.requestedService') }}</span>
+            <span class="summary-value">{{ selectedService?.nombre }}</span>
           </div>
           <div class="summary-divider"></div>
           <div class="summary-row">
-            <span class="summary-label">Pacientes en espera</span>
-            <span class="summary-value">{{ waitingByService[selectedService?.id] }} paciente{{ waitingByService[selectedService?.id] !== 1 ? 's' : '' }}</span>
+            <span class="summary-label">{{ locale.t('kiosk.patientsWaiting') }}</span>
+            <span class="summary-value">
+              {{ waitingByService[selectedService?.id] }}
+              {{ waitingByService[selectedService?.id] !== 1 ? locale.t('kiosk.patientPlural') : locale.t('kiosk.patientSingular') }}
+            </span>
           </div>
           <div class="summary-divider"></div>
           <div class="summary-row">
-            <span class="summary-label">Prioridad</span>
+            <span class="summary-label">{{ locale.t('kiosk.priority') }}</span>
             <span class="summary-value" :class="isPriority ? 'summary-value--special' : 'summary-value--normal'">
-              {{ isPriority ? 'Especial' : 'Regular' }}
+              {{ isPriority ? locale.t('kiosk.prioritySpecial') : locale.t('kiosk.priorityRegular') }}
             </span>
           </div>
           <template v-if="patientName.trim()">
             <div class="summary-divider"></div>
             <div class="summary-row">
-              <span class="summary-label">Nombre</span>
+              <span class="summary-label">{{ locale.t('kiosk.name') }}</span>
               <span class="summary-value">{{ patientName.trim() }}</span>
             </div>
           </template>
           <template v-if="idNumber.trim()">
             <div class="summary-divider"></div>
             <div class="summary-row">
-              <span class="summary-label">Cédula</span>
+              <span class="summary-label">{{ locale.t('kiosk.id') }}</span>
               <span class="summary-value">{{ idNumber.trim() }}</span>
             </div>
           </template>
           <template v-if="selectedConditions.length > 0">
             <div class="summary-divider"></div>
             <div class="summary-row">
-              <span class="summary-label">Condición</span>
+              <span class="summary-label">{{ locale.t('kiosk.condition') }}</span>
               <span class="summary-value">
                 {{ CONDITIONS.filter(c => selectedConditions.includes(c.id)).map(c => c.label).join(', ') }}
               </span>
@@ -344,7 +345,7 @@ const showHelp = ref(false)
         </div>
       </div>
 
-      <footer class="kiosk-footer">© 2026 JM Sequence</footer>
+      <footer class="kiosk-footer">{{ locale.t('kiosk.footer') }}</footer>
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════════════ -->
@@ -360,10 +361,10 @@ const showHelp = ref(false)
           </svg>
         </div>
 
-        <p class="success-eyebrow">Tu turno</p>
+        <p class="success-eyebrow">{{ locale.t('kiosk.yourTicket') }}</p>
         <div class="success-number">{{ createdTurn?.id }}</div>
-        <p class="success-service">{{ store.SERVICES.find(s => s.id === createdTurn?.serviceID)?.labelEs }}</p>
-        <p class="success-instruction">Dirígete a la sala de espera</p>
+        <p class="success-service">{{ createdTurn?.serviceName }}</p>
+        <p class="success-instruction">{{ locale.t('kiosk.goWaitingRoom') }}</p>
 
         <div class="success-divider"></div>
 
@@ -373,9 +374,9 @@ const showHelp = ref(false)
             :style="{ width: (resetCountdown / 15 * 100) + '%' }"
           ></div>
         </div>
-        <p class="success-countdown">Volviendo al inicio en {{ resetCountdown }}s...</p>
+        <p class="success-countdown">{{ locale.t('kiosk.returningIn') }} {{ resetCountdown }}s...</p>
 
-        <button class="btn-ghost btn-ghost--light" @click="resetToIdle">Volver al inicio</button>
+        <button class="btn-ghost btn-ghost--light" @click="resetToIdle">{{ locale.t('kiosk.returnHome') }}</button>
       </div>
     </div>
 
@@ -390,9 +391,9 @@ const showHelp = ref(false)
               <circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/>
             </svg>
           </div>
-          <h3 class="overlay-title">¿Necesitas ayuda?</h3>
-          <p class="overlay-body">Por favor acércate a la recepción o solicita asistencia a un agente disponible.</p>
-          <button class="btn-primary overlay-btn" @click="showHelp = false">Entendido</button>
+          <h3 class="overlay-title">{{ locale.t('kiosk.helpTitle') }}</h3>
+          <p class="overlay-body">{{ locale.t('kiosk.helpBody') }}</p>
+          <button class="btn-primary overlay-btn" @click="showHelp = false">{{ locale.t('kiosk.understood') }}</button>
         </div>
       </div>
     </Teleport>
@@ -781,9 +782,7 @@ const showHelp = ref(false)
   text-align: center;
 }
 
-.success-check {
-  margin-bottom: 4px;
-}
+.success-check { margin-bottom: 4px; }
 
 .success-eyebrow {
   margin: 0;
