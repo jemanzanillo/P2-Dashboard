@@ -6,6 +6,7 @@ const FohView   = () => import('./views/fohView.vue')
 const AgentView = () => import('./views/agentView.vue')
 const KioskView = () => import('./views/kioskView.vue')
 const LoginView = () => import('./views/loginView.vue')
+const AdminView = () => import('./views/adminView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -14,6 +15,7 @@ const router = createRouter({
     { path: '/login',  component: LoginView },
     { path: '/foh',    component: FohView },
     { path: '/agent',  component: AgentView, meta: { requiresAuth: true } },
+    { path: '/admin',  component: AdminView, meta: { requiresAuth: true, requiresAdmin: true } },
     { path: '/kiosk',  component: KioskView },  // public — no auth required
   ],
 })

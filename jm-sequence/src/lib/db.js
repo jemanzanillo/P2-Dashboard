@@ -115,8 +115,10 @@ export async function fetchCounters() {
 
   return (counters ?? []).map(row => ({
     id:            row.id,
+    numero:        row.numero,
     label:         row.etiqueta,
     status:        row.estado === 'activa' ? 'active' : 'inactive',
+    esPrioritaria: row.es_prioritaria ?? false,
     serviceIDs:    (row.ventanilla_servicios ?? []).map(vs => vs.servicio_id),
     currentTurnId: activeMap[row.id] ?? null,
   }))
@@ -260,6 +262,65 @@ export async function fetchFohVideos() {
     .order('orden')
   if (error) throw error
   return data ?? []
+}
+
+// ─── Admin ─────────────────────────────────────────────────────────────────────
+
+export async function fetchAllProfiles() {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, nombre, rol, ventanilla_id')
+    .order('nombre')
+  if (error) throw error
+  return data ?? []
+}
+
+export async function updateProfile({ id, ventanillaId }) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ ventanilla_id: ventanillaId ?? null })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function updateVentanilla({ id, etiqueta, estado, esPrioritaria }) {
+  const { error } = await supabase
+    .from('ventanillas')
+    .update({ etiqueta, estado, es_prioritaria: esPrioritaria })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function assignServicesToCounter({ ventanillaId, serviceIds }) {
+  const { error: delError } = await supabase
+    .from('ventanilla_servicios')
+    .delete()
+    .eq('ventanilla_id', ventanillaId)
+  if (delError) throw delError
+
+  if (serviceIds.length === 0) return
+
+  const { error: insError } = await supabase
+    .from('ventanilla_servicios')
+    .insert(serviceIds.map(sid => ({ ventanilla_id: ventanillaId, servicio_id: sid })))
+  if (insError) throw insError
+}
+
+export async function fetchConfigSistema() {
+  const { data, error } = await supabase
+    .from('config_sistema')
+    .select('clave, valor')
+    .order('clave')
+  if (error) throw error
+  return data ?? []
+}
+
+export async function updateConfigItem({ clave, valor }) {
+  const { error } = await supabase
+    .from('config_sistema')
+    .update({ valor })
+    .eq('clave', clave)
+  if (error) throw error
 }
 
 export function subscribeToChanges({ onTurnoChange, onVentanillaChange }) {

@@ -66,6 +66,16 @@ function openScreen(path) {
           </svg>
         </button>
 
+        <button class="btn btn--admin" @click="openScreen('/admin')">
+          <div class="btn-content">
+            <span class="btn-label">Admin Panel</span>
+            <span class="btn-sub">1440p · System administration</span>
+          </div>
+          <svg class="btn-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M4 10h12M12 5l5 5-5 5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+
       </nav>
 
       <footer class="launcher-footer">
@@ -255,6 +265,17 @@ function openScreen(path) {
 .btn--kiosk:hover {
   background-color: #0e2a1e;
   border-color: rgba(32, 203, 139, 0.6);
+}
+
+/* Admin */
+.btn--admin {
+  background-color: #112035;
+  color: #EEF3FF;
+  border: 1px solid rgba(240, 164, 41, 0.35);
+}
+.btn--admin:hover {
+  background-color: #1c1a0d;
+  border-color: rgba(240, 164, 41, 0.6);
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */
