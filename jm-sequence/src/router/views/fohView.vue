@@ -1,5 +1,6 @@
 <template>
-  <div class="foh-screen">
+  <div class="foh-wrapper">
+  <div class="foh-screen" :style="{ transform: `translate(-50%, -50%) scale(${fohScale})` }">
 
     <!-- ── Audio activation overlay ──────────────────────────────────── -->
     <div v-if="!audioReady" class="audio-overlay" @click="requestAudioPermission">
@@ -129,6 +130,7 @@
     </footer>
 
   </div>
+  </div>
 </template>
 
 <script setup>
@@ -163,6 +165,15 @@ watch(() => store.callSeq, () => {
   announce(turn, (turn.callCount ?? 1) > 1)
 })
 
+// Viewport scale — keeps 1920×1080 canvas fitting any 16:9 (or other) screen
+const fohScale = ref(1)
+
+function updateScale() {
+  const scaleX = window.innerWidth  / 1920
+  const scaleY = window.innerHeight / 1080
+  fohScale.value = Math.min(scaleX, scaleY)
+}
+
 // Live clock
 const currentTime = ref('')
 let clockTimer
@@ -182,6 +193,10 @@ onMounted(async () => {
   // authenticated session is present (App.vue only inits on login).
   if (!store.initialized) await store.init()
 
+  // Scale canvas to viewport on load and on resize
+  updateScale()
+  window.addEventListener('resize', updateScale)
+
   // Wait for any pending watch callbacks before enabling announcements —
   // prevents announcing a turn that was already active when the page loaded.
   await nextTick()
@@ -192,6 +207,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearInterval(clockTimer)
+  window.removeEventListener('resize', updateScale)
 })
 
 // Last 8 non-waiting turns — includes 'called' so patients can catch up
@@ -250,9 +266,22 @@ function badgeClass(status) {
   --border-visible:  rgba(225, 233, 236, 0.60);
 }
 
-/* ── Root screen ────────────────────────────────────────────────────── */
-.foh-screen {
+/* ── Viewport wrapper — fills the screen, centers the canvas ────────── */
+.foh-wrapper {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #07101E;
   position: relative;
+}
+
+/* ── Root screen — fixed 1920×1080 canvas, scaled to fit ────────────── */
+.foh-screen {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* transform set via :style binding — translate(-50%,-50%) + scale(n) */
+  transform-origin: center center;
   width: 1920px;
   height: 1080px;
   display: grid;

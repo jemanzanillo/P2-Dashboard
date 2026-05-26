@@ -117,7 +117,6 @@ async function saveCounter() {
       ventanillaId: c.id,
       serviceIds:   counterForm.value.serviceIds,
     })
-    await store.init()
     editCounterModal.value = false
   } catch (e) {
     console.error(e)
@@ -133,7 +132,6 @@ async function toggleCounterStatus(counter) {
     estado:        counter.status === 'active' ? 'inactiva' : 'activa',
     esPrioritaria: counter.esPrioritaria,
   })
-  await store.init()
 }
 
 // ── Agent assign modal ─────────────────────────────────────────────────────────

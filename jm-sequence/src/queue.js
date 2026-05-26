@@ -80,11 +80,8 @@ export const useQueueStore = defineStore('queue', () => {
     }
   }
 
-  function handleVentanillaEvent({ new: newRow }) {
-    const idx = counters.value.findIndex(c => c.id === newRow.id)
-    if (idx >= 0) {
-      counters.value[idx].status = newRow.estado === 'activa' ? 'active' : 'inactive'
-    }
+  function handleVentanillaEvent() {
+    fetchCounters().then(data => { counters.value = data })
   }
 
   // ── Init / cleanup ─────────────────────────────────────────────────────────

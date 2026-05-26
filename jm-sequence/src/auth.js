@@ -13,16 +13,17 @@ export const useAuthStore = defineStore('auth', () => {
     if (_initialized) return
     _initialized = true
 
-    const { data: { session } } = await supabase.auth.getSession()
-    user.value = session?.user ?? null
-    if (user.value) await fetchProfile()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      user.value = session?.user ?? null
-      if (user.value) await fetchProfile()
-      else profile.value = null
+    // Let INITIAL_SESSION drive init — avoids race where getSession resolves
+    // before the router mounts but onAuthStateChange fires after the guard runs.
+    await new Promise((resolve) => {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        user.value = session?.user ?? null
+        if (user.value) await fetchProfile()
+        else profile.value = null
+        resolve()
+      })
+      _unsubscribe = () => subscription.unsubscribe()
     })
-    _unsubscribe = () => subscription.unsubscribe()
   }
 
   function cleanup() {
