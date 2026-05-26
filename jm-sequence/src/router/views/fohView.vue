@@ -47,8 +47,8 @@
               :key="counter.id"
               class="counter-card"
             >
-              <span class="counter-label">{{ locale.t('foh.station') }} {{ counter.id }}</span>
-              <span class="counter-turn">{{ counter.currentTurnId || '—' }}</span>
+              <span class="counter-label">{{ counter.label }}</span>
+              <span class="counter-turn">{{ turnNumberFor(counter.currentTurnId) }}</span>
             </div>
           </div>
         </section>
@@ -198,6 +198,12 @@ const displayHistory = computed(() => store.history.slice(0, 8))
 const activeCounterId = computed(() =>
   lastCalledTurn.value?.counterId ?? store.agentCounterId
 )
+
+// Resolve a ventanilla's active turn UUID → display number (e.g. "L014")
+function turnNumberFor(dbId) {
+  if (!dbId) return '—'
+  return store.turns.find(t => t.dbId === dbId)?.id ?? '—'
+}
 
 function dotClass(status) {
   if (status === 'attended') return 'dot--green'
