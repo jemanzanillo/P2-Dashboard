@@ -12,7 +12,7 @@ const router = createRouter({
   routes: [
     { path: '/',       component: Launcher  },
     { path: '/login',  component: LoginView },
-    { path: '/foh',    component: FohView,   meta: { requiresAuth: true } },
+    { path: '/foh',    component: FohView },
     { path: '/agent',  component: AgentView, meta: { requiresAuth: true } },
     { path: '/kiosk',  component: KioskView, meta: { requiresAuth: true } },
   ],
@@ -20,7 +20,8 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  if (to.meta.requiresAuth && !auth.user) return '/login'
+  if (to.meta.requiresAuth && !auth.user)
+    return { path: '/login', query: { redirect: to.fullPath } }
   if (to.meta.requiresAdmin && auth.profile?.rol !== 'admin') return '/agent'
 })
 

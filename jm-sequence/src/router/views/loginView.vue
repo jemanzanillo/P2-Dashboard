@@ -55,11 +55,12 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/auth'
 import { useLocaleStore } from '@/locale.js'
 
 const router  = useRouter()
+const route   = useRoute()
 const auth    = useAuthStore()
 const locale  = useLocaleStore()
 
@@ -73,7 +74,10 @@ async function handleSubmit() {
   loading.value  = true
   try {
     await auth.login(email.value, password.value)
-    const dest = auth.profile?.rol === 'admin' ? '/admin' : '/agent'
+    const fallback = auth.profile?.rol === 'admin' ? '/admin' : '/agent'
+    const dest = (route.query.redirect && route.query.redirect !== '/foh')
+      ? route.query.redirect
+      : fallback
     router.push(dest)
   } catch (e) {
     errorMsg.value = locale.t('login.error')

@@ -175,6 +175,10 @@ function updateClock() {
 }
 
 onMounted(async () => {
+  // FOH is a public screen — initialize the queue store directly if no
+  // authenticated session is present (App.vue only inits on login).
+  if (!store.initialized) await store.init()
+
   // Wait for any pending watch callbacks before enabling announcements —
   // prevents announcing a turn that was already active when the page loaded.
   await nextTick()
