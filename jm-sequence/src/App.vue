@@ -20,6 +20,7 @@ onUnmounted(() => store.cleanup())
 </script>
 
 <template>
+  <Analytics />
   <router-view />
   <Analytics />
 </template>
