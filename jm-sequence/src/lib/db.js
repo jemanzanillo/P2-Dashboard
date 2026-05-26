@@ -251,6 +251,17 @@ export async function transferTurn({ dbId, newVentanillaId }) {
 
 // ─── Realtime ──────────────────────────────────────────────────────────────────
 
+export async function fetchFohVideos() {
+  const { data, error } = await supabase
+    .from('contenido_foh')
+    .select('id, nombre, url, orden')
+    .eq('tipo', 'video')
+    .eq('activo', true)
+    .order('orden')
+  if (error) throw error
+  return data ?? []
+}
+
 export function subscribeToChanges({ onTurnoChange, onVentanillaChange }) {
   const channel = supabase
     .channel('jm-sequence-global')

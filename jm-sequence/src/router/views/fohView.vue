@@ -35,8 +35,10 @@
       <!-- Left column -->
       <div class="left-col">
 
-        <!-- Video zone (placeholder) -->
-        <div class="video-zone"></div>
+        <!-- Video zone -->
+        <div class="video-zone">
+          <FohVideoPlayer />
+        </div>
 
         <!-- Counters carousel -->
         <section class="counters-section">
@@ -134,6 +136,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useQueueStore } from '@/queue'
 import { useTurnAnnouncer } from '@/composables/useTurnAnnouncer'
 import { useLocaleStore } from '@/locale.js'
+import FohVideoPlayer from '@/components/FohVideoPlayer.vue'
 
 const store  = useQueueStore()
 const locale = useLocaleStore()
