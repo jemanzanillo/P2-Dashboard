@@ -109,8 +109,9 @@ export const useQueueStore = defineStore('queue', () => {
       }
 
       _unsubscribe = subscribeToChanges({
-        onTurnoChange:      handleTurnoEvent,
-        onVentanillaChange: handleVentanillaEvent,
+        onTurnoChange:               handleTurnoEvent,
+        onVentanillaChange:          handleVentanillaEvent,
+        onVentanillaServicioChange:  async () => { counters.value = await fetchCounters() },
       })
       initialized.value = true
     } catch (e) {

@@ -323,11 +323,12 @@ export async function updateConfigItem({ clave, valor }) {
   if (error) throw error
 }
 
-export function subscribeToChanges({ onTurnoChange, onVentanillaChange }) {
+export function subscribeToChanges({ onTurnoChange, onVentanillaChange, onVentanillaServicioChange }) {
   const channel = supabase
     .channel('jm-sequence-global')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'turnos' }, onTurnoChange)
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'ventanillas' }, onVentanillaChange)
+    .on('postgres_changes', { event: '*',    schema: 'public', table: 'turnos'               }, onTurnoChange)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'ventanillas'         }, onVentanillaChange)
+    .on('postgres_changes', { event: '*',    schema: 'public', table: 'ventanilla_servicios'  }, onVentanillaServicioChange)
     .subscribe()
   return () => supabase.removeChannel(channel)
 }
