@@ -4,7 +4,6 @@ import { useQueueStore } from '@/queue.js'
 import { useAuthStore } from '@/auth.js'
 import { Analytics } from '@vercel/analytics/vue'
 
-<Analytics/>
 const store = useQueueStore()
 const auth  = useAuthStore()
 
@@ -22,6 +21,7 @@ onUnmounted(() => store.cleanup())
 
 <template>
   <router-view />
+  <Analytics />
 </template>
 
 <style scoped></style>
