@@ -13,14 +13,20 @@ export const useAuthStore = defineStore('auth', () => {
     if (_initialized) return
     _initialized = true
 
-    // Let INITIAL_SESSION drive init — avoids race where getSession resolves
-    // before the router mounts but onAuthStateChange fires after the guard runs.
+    // Await INITIAL_SESSION so the router guard sees the correct auth state
+    // before the first route renders. We only resolve on INITIAL_SESSION —
+    // later events (SIGNED_IN, SIGNED_OUT) are handled by the same listener
+    // but don't block mount. fetchProfile is wrapped so a DB/RLS error never
+    // leaves the Promise permanently pending (blank page).
     await new Promise((resolve) => {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         user.value = session?.user ?? null
-        if (user.value) await fetchProfile()
-        else profile.value = null
-        resolve()
+        if (user.value) {
+          try { await fetchProfile() } catch (e) { console.error('[auth] fetchProfile:', e) }
+        } else {
+          profile.value = null
+        }
+        if (event === 'INITIAL_SESSION') resolve()
       })
       _unsubscribe = () => subscription.unsubscribe()
     })
