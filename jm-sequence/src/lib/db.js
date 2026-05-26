@@ -117,7 +117,7 @@ export async function fetchCounters() {
     id:            row.id,
     label:         row.etiqueta,
     status:        row.estado === 'activa' ? 'active' : 'inactive',
-    serviceIDs:    (row.ventanillas_servicios ?? []).map(vs => vs.servicio_id),
+    serviceIDs:    (row.ventanilla_servicios ?? []).map(vs => vs.servicio_id),
     currentTurnId: activeMap[row.id] ?? null,
   }))
 }

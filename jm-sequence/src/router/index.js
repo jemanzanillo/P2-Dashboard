@@ -14,7 +14,7 @@ const router = createRouter({
     { path: '/login',  component: LoginView },
     { path: '/foh',    component: FohView },
     { path: '/agent',  component: AgentView, meta: { requiresAuth: true } },
-    { path: '/kiosk',  component: KioskView, meta: { requiresAuth: true } },
+    { path: '/kiosk',  component: KioskView },  // public — no auth required
   ],
 })
 

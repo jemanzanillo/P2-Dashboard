@@ -192,11 +192,11 @@ const showHelp = ref(false)
             <div
               class="service-icon"
               :style="activeCountersByService[s.id] > 0
-                ? { background: s.color + '1a' }
+                ? { background: (s.color_token || '#1A72FF') + '1a' }
                 : { background: '#F3F4F6' }"
             >
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-                :stroke="activeCountersByService[s.id] > 0 ? s.color : '#9CA3AF'"
+                :stroke="activeCountersByService[s.id] > 0 ? (s.color_token || '#1A72FF') : '#9CA3AF'"
                 stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
                 <path :d="SERVICE_ICONS[s.prefijo_turno]"/>
               </svg>
@@ -406,8 +406,9 @@ const showHelp = ref(false)
 
 /* ── Root ─────────────────────────────────────────────────────────────────── */
 .kiosk {
-  width: 1024px;
-  height: 768px;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh; /* dynamic viewport: avoids browser chrome on mobile */
   overflow: hidden;
   background: #EEF1F6;
   font-family: 'Figtree', sans-serif;
@@ -454,7 +455,7 @@ const showHelp = ref(false)
   margin: 0;
   font-family: 'Syne', sans-serif;
   font-weight: 700;
-  font-size: 48px;
+  font-size: clamp(32px, 5vw, 48px);
   color: #111827;
   letter-spacing: 0.03em;
 }
@@ -462,7 +463,7 @@ const showHelp = ref(false)
 .idle-sub {
   margin: 0;
   font-family: 'Figtree', sans-serif;
-  font-size: 22px;
+  font-size: clamp(16px, 2.5vw, 22px);
   color: #4B5563;
 }
 
@@ -523,7 +524,7 @@ const showHelp = ref(false)
   gap: 16px;
 }
 .screen-body--data {
-  padding: 20px 72px 16px;
+  padding: 20px clamp(24px, 7vw, 72px) 16px;
   gap: 20px;
 }
 .screen-body--center {
@@ -539,7 +540,7 @@ const showHelp = ref(false)
   margin: 0;
   font-family: 'Syne', sans-serif;
   font-weight: 600;
-  font-size: 26px;
+  font-size: clamp(20px, 3vw, 26px);
   color: #111827;
 }
 
@@ -556,6 +557,22 @@ const showHelp = ref(false)
   gap: 14px;
   flex: 1;
   overflow: hidden;
+}
+
+/* Portrait tablets: 2-column grid, allow vertical scroll if cards overflow */
+@media (orientation: portrait) {
+  .service-grid {
+    grid-template-columns: repeat(2, 1fr);
+    overflow-y: auto;
+  }
+  .screen-body {
+    padding-left: clamp(16px, 4vw, 32px);
+    padding-right: clamp(16px, 4vw, 32px);
+  }
+  .screen-body--data {
+    padding-left: clamp(16px, 5vw, 48px);
+    padding-right: clamp(16px, 5vw, 48px);
+  }
 }
 
 .service-card {
@@ -723,7 +740,7 @@ const showHelp = ref(false)
   background: #FFFFFF;
   border-radius: 14px;
   padding: 28px 36px;
-  width: 480px;
+  width: min(480px, 90%);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -793,7 +810,7 @@ const showHelp = ref(false)
 .success-number {
   font-family: 'Syne', sans-serif;
   font-weight: 800;
-  font-size: 100px;
+  font-size: clamp(64px, 14vw, 100px);
   color: #1A72FF;
   line-height: 1;
   letter-spacing: -2px;
@@ -814,14 +831,14 @@ const showHelp = ref(false)
 }
 
 .success-divider {
-  width: 320px;
+  width: min(320px, 80%);
   height: 1px;
   background: rgba(0,0,0,0.1);
   margin: 6px 0;
 }
 
 .success-bar-wrap {
-  width: 320px;
+  width: min(320px, 80%);
   height: 4px;
   background: rgba(26, 114, 255, 0.15);
   border-radius: 9999px;
