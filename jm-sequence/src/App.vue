@@ -2,7 +2,9 @@
 import { watch, onUnmounted } from 'vue'
 import { useQueueStore } from '@/queue.js'
 import { useAuthStore } from '@/auth.js'
+import { Analytics } from '@vercel/analytics/vue'
 
+<Analytics/>
 const store = useQueueStore()
 const auth  = useAuthStore()
 
