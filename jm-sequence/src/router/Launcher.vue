@@ -1,17 +1,12 @@
 <script setup>
 import { useRouter } from 'vue-router'
-import { useQueueStore } from '@/queue'
 
 const router = useRouter()
-const store = useQueueStore()
 
 function openScreen(path) {
   router.push(path)
 }
 
-function resetDemo() {
-  store.resetDemo()
-}
 </script>
 
 <template>
@@ -53,17 +48,6 @@ function resetDemo() {
           </div>
           <svg class="btn-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
             <path d="M4 10h12M12 5l5 5-5 5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-
-        <button class="btn btn--ghost" @click="resetDemo">
-          <div class="btn-content">
-            <span class="btn-label">Reset Demo</span>
-            <span class="btn-sub">Restore 20 turns · Clear storage</span>
-          </div>
-          <svg class="btn-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M3 10a7 7 0 1 0 1.7-4.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M3 5v5h5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
 

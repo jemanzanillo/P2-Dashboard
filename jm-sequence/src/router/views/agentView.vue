@@ -29,7 +29,6 @@ function updateElapsed() {
 }
 
 onMounted(() => {
-    store.loadFromStorage()
     updateClock()
     clockTimer  = setInterval(updateClock, 1000)
     elapsedTimer = setInterval(updateElapsed, 1000)

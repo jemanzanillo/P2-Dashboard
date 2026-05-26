@@ -174,24 +174,17 @@ function updateClock() {
   currentTime.value = `${h12}:${m}:${s} ${ampm}`
 }
 
-function onStorageChange(e) {
-  if (e.key === 'jm-state') store.loadFromStorage()
-}
-
 onMounted(async () => {
-  store.loadFromStorage()
-  // Wait for Vue to flush the pending watch callbacks triggered by loadFromStorage()
-  // before enabling announcements — prevents announcing a turn that was already active.
+  // Wait for any pending watch callbacks before enabling announcements —
+  // prevents announcing a turn that was already active when the page loaded.
   await nextTick()
   mountComplete.value = true
   updateClock()
   clockTimer = setInterval(updateClock, 1000)
-  window.addEventListener('storage', onStorageChange)
 })
 
 onUnmounted(() => {
   clearInterval(clockTimer)
-  window.removeEventListener('storage', onStorageChange)
 })
 
 // Last 8 non-waiting turns — includes 'called' so patients can catch up
@@ -437,7 +430,7 @@ function badgeClass(status) {
 .active-number {
   font-family: 'Syne', sans-serif;
   font-weight: 700;
-  font-size: 128px;
+  font-size: clamp(64px, 9vw, 128px);
   color: #EEF3FF;
   line-height: 0.85;
 }
