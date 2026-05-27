@@ -364,9 +364,11 @@ export const useQueueStore = defineStore('queue', () => {
     agentCounterId.value = id ?? null
     if (!id) { activeTurn.value = null; return }
     const myCounter = counters.value.find(c => c.id === id)
-    if (myCounter?.currentTurnId) {
-      activeTurn.value = turns.value.find(t => t.dbId === myCounter.currentTurnId) ?? null
-    }
+    // Always reset activeTurn — prevents stale FOH-branch value (set during init()
+    // when agentCounterId was still null) from leaking into a counter with no active turn.
+    activeTurn.value = myCounter?.currentTurnId
+      ? turns.value.find(t => t.dbId === myCounter.currentTurnId) ?? null
+      : null
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────

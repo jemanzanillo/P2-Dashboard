@@ -16,6 +16,7 @@ export const useAuthStore = defineStore('auth', () => {
   let _unsubscribe  = null
   let _sessionCheckInterval = null
   let _onVisibilityChange   = null
+  let _pendingSignOut = false   // set true only when logout() is called from THIS tab
 
   async function init() {
     if (_initialized) return
@@ -35,7 +36,26 @@ export const useAuthStore = defineStore('auth', () => {
     // Handles SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, INITIAL_SESSION, USER_UPDATED.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('[auth] onAuthStateChange:', event, { hasSession: !!session })
+
+      // Cross-tab guard: when this tab already has an active session for User A,
+      // ignore events triggered by User B logging in on a different tab in the same
+      // browser. Supabase shares the auth token in localStorage across tabs, so a
+      // second agent logging in on the same machine would otherwise wipe this
+      // agent's session state and break the queue store mid-shift.
+      if (user.value?.id && session?.user?.id && user.value.id !== session.user.id) {
+        console.warn('[auth] Ignoring cross-tab auth event for different user:', session.user.email)
+        return
+      }
+
       if (event === 'SIGNED_OUT') {
+        // Only honor SIGNED_OUT if this tab explicitly called logout(). Cross-tab
+        // SIGNED_OUT events (e.g. from another user's login flow triggering a
+        // session replacement) must be ignored to keep this agent's session alive.
+        if (!_pendingSignOut) {
+          console.warn('[auth] Ignoring cross-tab SIGNED_OUT (not initiated from this tab)')
+          return
+        }
+        _pendingSignOut = false
         user.value    = null
         profile.value = null
         return
@@ -137,6 +157,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
+    _pendingSignOut = true
     await supabase.auth.signOut({ scope: 'local' })
   }
 
