@@ -28,7 +28,6 @@ export const useQueueStore = defineStore('queue', () => {
   const counters       = ref([])
   const services       = ref([])
   const conditions     = ref([])
-  const callSeq        = ref(0)
   const agentCounterId = ref(null)
 
   const initialized   = ref(false)
@@ -41,6 +40,20 @@ export const useQueueStore = defineStore('queue', () => {
   let _onOnline           = null
   let _resyncInFlight     = false
   let _mutationsInFlight  = 0   // Block resync while any action is awaiting the DB
+
+  // Direct event emitter for FOH audio announcements. Using Vue watchers on a
+  // counter caused two rapid simultaneous calls (two agents) to be deduped into
+  // one watcher flush, silencing the first announcement. Emitting directly from
+  // the Realtime callback fires synchronously inside each microtask, before Vue
+  // can batch them.
+  let _announceListeners = []
+  function onAnnounce(fn) {
+    _announceListeners.push(fn)
+    return () => { _announceListeners = _announceListeners.filter(f => f !== fn) }
+  }
+  function _emitAnnounce(turn, isRecall) {
+    _announceListeners.forEach(fn => fn(turn, isRecall))
+  }
 
   // ── Realtime handlers ──────────────────────────────────────────────────────
 
@@ -71,10 +84,18 @@ export const useQueueStore = defineStore('queue', () => {
         // Keep counters[].currentTurnId in sync with turn state changes.
         // fetchCounters() only reflects 'llamado' turns at query time; without this
         // patch, the FOH carousel stays stale after a turn is finished/cancelled.
+        // Guard: only clear currentTurnId if THIS turn is still the counter's
+        // current turn. A late no-show / finish event must not overwrite a newer
+        // call that already replaced it (race: agent calls next turn before the
+        // previous turn's noshow UPDATE propagates from the DB).
         if (turn.counterId) {
           const counter = counters.value.find(c => c.id === turn.counterId)
           if (counter) {
-            counter.currentTurnId = turn.status === 'called' ? turn.dbId : null
+            if (turn.status === 'called') {
+              counter.currentTurnId = turn.dbId
+            } else if (counter.currentTurnId === turn.dbId) {
+              counter.currentTurnId = null
+            }
           }
         }
 
@@ -100,13 +121,13 @@ export const useQueueStore = defineStore('queue', () => {
           activeTurn.value = { ...turn }
         }
 
-        // Increment callSeq to trigger FOH chime + TTS announcements.
-        // Agent stores: only for their counter. FOH store (no counter): for all counters.
+        // Emit FOH audio announcement directly — bypasses Vue's watcher scheduler
+        // so two simultaneous calls from different agents both fire their chimes.
         const firstCall = oldRow?.called_at == null && newRow?.called_at != null
         const isRecall  = newRow?.call_count > (oldRow?.call_count ?? 0) && oldRow?.called_at != null
         const counterMatches = agentCounterId.value == null || turn.counterId === agentCounterId.value
         if ((firstCall || isRecall) && counterMatches) {
-          callSeq.value++
+          _emitAnnounce(turn, isRecall)
         }
       }).catch(() => resyncFromServer())
       return
@@ -157,7 +178,7 @@ export const useQueueStore = defineStore('queue', () => {
         const isNewTurn   = !prevActive || prevActive.dbId !== newActive.dbId
         const isNewRecall = prevActive?.dbId === newActive.dbId &&
                             (newActive.callCount ?? 0) > (prevActive.callCount ?? 0)
-        if (isNewTurn || isNewRecall) callSeq.value++
+        if (isNewTurn || isNewRecall) _emitAnnounce(newActive, isNewRecall)
       }
     } catch (e) {
       console.warn('[queue] resyncFromServer failed:', e.message)
@@ -434,9 +455,8 @@ export const useQueueStore = defineStore('queue', () => {
     activeTurn.value = optimistic
     patchTurn(next.dbId, optimistic)
     setCounterCurrent(agentCounterId.value, next.dbId)
-    // Note: callSeq (chime + TTS) is driven by the Realtime UPDATE event in
-    // handleTurnoEvent, not here. Bumping it optimistically would cause a
-    // double-chime when the Realtime event arrives a moment later.
+    // Announcement is emitted via _emitAnnounce in handleTurnoEvent when the
+    // Realtime UPDATE confirms the call. Emitting it here would double-chime.
     _mutationsInFlight++
     try {
       await dbCallTurn({ dbId: next.dbId, ventanillaId: agentCounterId.value, calledAt })
@@ -460,7 +480,7 @@ export const useQueueStore = defineStore('queue', () => {
     const patch = { callCount: newCount, callLog: newLog, lastCalledAt: now }
     patchTurn(t.dbId, patch)
     activeTurn.value = { ...activeTurn.value, ...patch }
-    // callSeq is bumped by Realtime — see note in callNext().
+    // Announcement emitted by Realtime UPDATE — see callNext() note.
     _mutationsInFlight++
     try {
       await dbRecallTurn({ dbId: t.dbId, callCount: newCount, callLog: newLog })
@@ -655,12 +675,12 @@ export const useQueueStore = defineStore('queue', () => {
     services,
     conditions,
     agentCounterId,
-    callSeq,
     initialized,
     loading,
     error,
     realtimeStatus,
     // actions
+    onAnnounce,
     init,
     cleanup,
     setCounter,

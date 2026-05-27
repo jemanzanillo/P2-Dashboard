@@ -155,15 +155,8 @@ watch(() => store.activeTurn, (newVal) => {
   if (newVal) lastCalledTurn.value = { ...newVal }
 })
 
-// Announce ONLY when callSeq increments (callNext / recallTurn).
-// callSeq is a primitive number — Vue skips this watcher entirely when reinstate,
-// defer, finish, or any other broadcast sends the same seq value back.
-watch(() => store.callSeq, () => {
-  if (!mountComplete.value) return
-  const turn = store.activeTurn
-  if (!turn) return
-  announce(turn, (turn.callCount ?? 1) > 1)
-})
+// Announce via direct emitter — bypasses Vue's watcher scheduler so two
+// simultaneous calls from different agents both fire without being deduplicated.
 
 // Viewport scale — keeps 1920×1080 canvas fitting any 16:9 (or other) screen
 const fohScale = ref(1)
@@ -188,6 +181,8 @@ function updateClock() {
   currentTime.value = `${h12}:${m}:${s} ${ampm}`
 }
 
+let _offAnnounce = null
+
 onMounted(async () => {
   // FOH is a public screen — initialize the queue store directly if no
   // authenticated session is present (App.vue only inits on login).
@@ -201,6 +196,14 @@ onMounted(async () => {
   // prevents announcing a turn that was already active when the page loaded.
   await nextTick()
   mountComplete.value = true
+
+  // Subscribe to turn announcements via direct emitter (not a Vue watcher) so
+  // two simultaneous calls from different agents are both announced independently.
+  _offAnnounce = store.onAnnounce((turn, isRecall) => {
+    if (!mountComplete.value) return
+    announce(turn, isRecall)
+  })
+
   updateClock()
   clockTimer = setInterval(updateClock, 1000)
 })
@@ -208,6 +211,7 @@ onMounted(async () => {
 onUnmounted(() => {
   clearInterval(clockTimer)
   window.removeEventListener('resize', updateScale)
+  _offAnnounce?.()
 })
 
 // Last 8 non-waiting turns — includes 'called' so patients can catch up
