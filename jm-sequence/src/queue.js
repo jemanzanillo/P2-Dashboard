@@ -18,6 +18,7 @@ import {
   cancelTurn    as dbCancelTurn,
   transferTurn  as dbTransferTurn,
   subscribeToChanges,
+  clearCorruptedSession,
 } from '@/lib/db.js'
 
 export const useQueueStore = defineStore('queue', () => {
@@ -94,6 +95,9 @@ export const useQueueStore = defineStore('queue', () => {
     try {
       console.log('[queue] init: starting...')
 
+      // Clear any corrupted session from localStorage that might cause hangs
+      clearCorruptedSession()
+
       // Test connection first
       console.log('[queue] init: testing connection...')
       const connTest = await testConnection()
@@ -103,16 +107,29 @@ export const useQueueStore = defineStore('queue', () => {
         throw new Error(`Connection test failed: ${connTest.error}`)
       }
 
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('[queue] Database query timeout after 5s')), 5000)
-      )
-      const fetchPromises = Promise.all([
-        fetchTurns(), fetchCounters(), fetchServices(), fetchConditions(),
-      ])
-      const [turnsData, countersData, servicesData, conditionsData] = await Promise.race([
-        fetchPromises,
-        timeoutPromise
-      ])
+      // Fetch each query separately with timeout to identify which one is hanging
+      const timeoutMs = 10000 // 10s timeout per query
+      const fetchWithTimeout = async (name, fn) => {
+        try {
+          console.log(`[queue] init: fetching ${name}...`)
+          const result = await Promise.race([
+            fn(),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Timeout fetching ${name} after ${timeoutMs}ms`)), timeoutMs)
+            )
+          ])
+          console.log(`[queue] init: ${name} complete`)
+          return result
+        } catch (e) {
+          console.error(`[queue] init: ${name} failed:`, e.message)
+          throw e
+        }
+      }
+
+      const turnsData = await fetchWithTimeout('turns', fetchTurns)
+      const countersData = await fetchWithTimeout('counters', fetchCounters)
+      const servicesData = await fetchWithTimeout('services', fetchServices)
+      const conditionsData = await fetchWithTimeout('conditions', fetchConditions)
       console.log('[queue] init: fetched data', { turnsCount: turnsData?.length, servicesCount: servicesData?.length })
       turns.value      = turnsData
       counters.value   = countersData
@@ -134,11 +151,37 @@ export const useQueueStore = defineStore('queue', () => {
     } catch (e) {
       error.value = e.message ?? 'Error al cargar los turnos'
       console.error('[queue] init error:', e)
+
+      const isAuthError = e.name === 'UnauthorizedError' || e.statusCode === 401 ||
+                         (e.message && e.message.includes('Unauthorized'))
+      const isTimeout = e.message && e.message.includes('Timeout')
+
+      if (isAuthError) {
+        console.error('[queue] Authentication error — session is invalid')
+        clearCorruptedSession()
+        error.value = 'Tu sesión expiró. Por favor, inicia sesión nuevamente.'
+        // Don't set initialized = true; let the view redirect to login
+        initialized.value = false
+      } else if (isTimeout) {
+        console.warn('[queue] Query timeout detected — clearing potentially corrupted session')
+        clearCorruptedSession()
+        // Clear all auth-related localStorage keys as a safety measure
+        Object.keys(localStorage).forEach(key => {
+          if (key.includes('auth') || key.includes('sb-') || key.includes('supabase')) {
+            console.warn('[queue] Clearing localStorage key:', key)
+            localStorage.removeItem(key)
+          }
+        })
+        error.value = 'Sesión expirada. Por favor, recarga la página e inicia sesión nuevamente.'
+        initialized.value = true
+      } else {
+        initialized.value = true
+      }
+
       turns.value = []
       counters.value = []
       services.value = []
       conditions.value = []
-      initialized.value = true
     } finally {
       loading.value = false
     }

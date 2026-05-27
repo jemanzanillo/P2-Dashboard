@@ -14,6 +14,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   let _initialized  = false
   let _unsubscribe  = null
+  let _sessionCheckInterval = null
 
   async function init() {
     if (_initialized) return
@@ -33,17 +34,55 @@ export const useAuthStore = defineStore('auth', () => {
           } else {
             profile.value = null
           }
-          if (event === 'INITIAL_SESSION') resolve()
+          if (event === 'INITIAL_SESSION') {
+            // Validate the session is actually usable
+            console.log('[auth] INITIAL_SESSION:', { hasUser: !!user.value, hasSession: !!session })
+            if (user.value && session?.access_token) {
+              // Session restored successfully
+              console.log('[auth] Session restored from storage')
+            } else if (user.value && !session?.access_token) {
+              // User exists but no valid token — session is corrupted
+              console.warn('[auth] Session restored but no valid token — clearing')
+              user.value = null
+              profile.value = null
+            }
+            resolve()
+          }
         })
         _unsubscribe = () => subscription.unsubscribe()
       }),
       new Promise((resolve) => setTimeout(() => resolve(), 3000)) // 3s timeout
     ])
+
+    // Start background session check to keep token fresh
+    _startSessionCheck()
   }
 
   function cleanup() {
     if (_unsubscribe) { _unsubscribe(); _unsubscribe = null }
+    if (_sessionCheckInterval) { clearInterval(_sessionCheckInterval); _sessionCheckInterval = null }
     _initialized = false
+  }
+
+  // Background session validation — runs every 5 minutes to catch token expiration early
+  function _startSessionCheck() {
+    if (_sessionCheckInterval) return // Already running
+
+    _sessionCheckInterval = setInterval(async () => {
+      try {
+        // Quietly refresh the token to keep session alive
+        const { data, error } = await supabase.auth.refreshSession()
+        if (error) {
+          console.warn('[auth] Session refresh failed:', error.message)
+          // Don't clear session yet — only if refresh explicitly fails
+          // This prevents log-out on transient network issues
+        } else if (data?.session) {
+          console.log('[auth] Session refreshed successfully')
+        }
+      } catch (e) {
+        console.error('[auth] Session check exception:', e.message)
+      }
+    }, 5 * 60 * 1000) // Check every 5 minutes
   }
 
   async function fetchProfile() {

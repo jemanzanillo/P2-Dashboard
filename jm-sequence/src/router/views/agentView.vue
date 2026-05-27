@@ -42,6 +42,16 @@ function updateElapsed() {
 onMounted(async () => {
     store.agentCounterId = auth.profile?.ventanilla_id ?? null
     await store.init()
+
+    // If init failed due to authentication issue, redirect to login
+    if (store.error && !store.initialized) {
+        console.error('[agentView] Queue init failed — authentication error:', store.error)
+        store.cleanup()
+        // Don't call auth.logout() — just redirect so Supabase can handle session cleanup
+        router.push('/login?reason=auth_failed')
+        return
+    }
+
     updateClock()
     clockTimer  = setInterval(updateClock, 1000)
     elapsedTimer = setInterval(updateElapsed, 1000)

@@ -25,6 +25,37 @@ export async function testConnection() {
   }
 }
 
+// ─── Error Handling ───────────────────────────────────────────────────────────
+
+// Global handler for 401 (Unauthorized) errors — indicates session is invalid
+class UnauthorizedError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'UnauthorizedError'
+    this.statusCode = 401
+  }
+}
+
+export function clearCorruptedSession() {
+  const keys = ['sb-zkldrnhipsejoefljkud-auth-token', 'sb-auth-token', 'supabase.auth.token']
+  for (const key of keys) {
+    if (localStorage.getItem(key)) {
+      console.warn('[db] Clearing corrupted localStorage key:', key)
+      localStorage.removeItem(key)
+    }
+  }
+}
+
+// Detect and handle 401 Unauthorized responses
+export function checkFor401(error, context) {
+  if (error?.status === 401 || error?.statusCode === 401) {
+    console.error(`[db] 401 Unauthorized in ${context} — session is invalid`)
+    clearCorruptedSession()
+    throw new UnauthorizedError(`Unauthorized: ${context}`)
+  }
+  return error
+}
+
 // ─── Row mapper ────────────────────────────────────────────────────────────────
 
 const STATUS_MAP = {
@@ -93,6 +124,7 @@ export async function fetchTurns() {
     const { data, error } = await query
     console.log('[db] fetchTurns: got response', { hasData: !!data, hasError: !!error })
     if (error) {
+      checkFor401(error, 'fetchTurns')
       console.error('[db] fetchTurns error:', error)
       throw error
     }
