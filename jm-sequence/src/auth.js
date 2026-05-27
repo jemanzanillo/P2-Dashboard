@@ -2,6 +2,12 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { supabase } from '@/lib/supabase'
 
+console.log('[auth.js] supabase client imported:', {
+  hasAuth: !!supabase.auth,
+  hasFrom: typeof supabase.from,
+  hasRealtime: !!supabase.realtime,
+})
+
 export const useAuthStore = defineStore('auth', () => {
   const user    = ref(null)
   const profile = ref(null)
@@ -18,18 +24,21 @@ export const useAuthStore = defineStore('auth', () => {
     // later events (SIGNED_IN, SIGNED_OUT) are handled by the same listener
     // but don't block mount. fetchProfile is wrapped so a DB/RLS error never
     // leaves the Promise permanently pending (blank page).
-    await new Promise((resolve) => {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        user.value = session?.user ?? null
-        if (user.value) {
-          try { await fetchProfile() } catch (e) { console.error('[auth] fetchProfile:', e) }
-        } else {
-          profile.value = null
-        }
-        if (event === 'INITIAL_SESSION') resolve()
-      })
-      _unsubscribe = () => subscription.unsubscribe()
-    })
+    await Promise.race([
+      new Promise((resolve) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+          user.value = session?.user ?? null
+          if (user.value) {
+            try { await fetchProfile() } catch (e) { console.error('[auth] fetchProfile:', e) }
+          } else {
+            profile.value = null
+          }
+          if (event === 'INITIAL_SESSION') resolve()
+        })
+        _unsubscribe = () => subscription.unsubscribe()
+      }),
+      new Promise((resolve) => setTimeout(() => resolve(), 3000)) // 3s timeout
+    ])
   }
 
   function cleanup() {

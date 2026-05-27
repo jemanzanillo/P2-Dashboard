@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import {
+  testConnection,
   fetchTurns,
   fetchCounters,
   fetchServices,
@@ -91,9 +92,28 @@ export const useQueueStore = defineStore('queue', () => {
     loading.value = true
     error.value   = null
     try {
-      const [turnsData, countersData, servicesData, conditionsData] = await Promise.all([
+      console.log('[queue] init: starting...')
+
+      // Test connection first
+      console.log('[queue] init: testing connection...')
+      const connTest = await testConnection()
+      console.log('[queue] init: connection test result:', connTest)
+
+      if (!connTest.success) {
+        throw new Error(`Connection test failed: ${connTest.error}`)
+      }
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('[queue] Database query timeout after 5s')), 5000)
+      )
+      const fetchPromises = Promise.all([
         fetchTurns(), fetchCounters(), fetchServices(), fetchConditions(),
       ])
+      const [turnsData, countersData, servicesData, conditionsData] = await Promise.race([
+        fetchPromises,
+        timeoutPromise
+      ])
+      console.log('[queue] init: fetched data', { turnsCount: turnsData?.length, servicesCount: servicesData?.length })
       turns.value      = turnsData
       counters.value   = countersData
       services.value   = servicesData
@@ -114,6 +134,11 @@ export const useQueueStore = defineStore('queue', () => {
     } catch (e) {
       error.value = e.message ?? 'Error al cargar los turnos'
       console.error('[queue] init error:', e)
+      turns.value = []
+      counters.value = []
+      services.value = []
+      conditions.value = []
+      initialized.value = true
     } finally {
       loading.value = false
     }

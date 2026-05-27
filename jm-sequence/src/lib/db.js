@@ -1,5 +1,30 @@
 import { supabase } from './supabase.js'
 
+// ─── Health check ──────────────────────────────────────────────────────────────
+
+export async function testConnection() {
+  console.log('[db] testConnection: starting...')
+  try {
+    console.log('[db] testConnection: attempting to query servicios (1 row limit)')
+    const response = await fetch(
+      'https://zkldrnhipsejoefljkud.supabase.co/rest/v1/servicios?limit=1',
+      {
+        headers: {
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        }
+      }
+    )
+    console.log('[db] testConnection: fetch completed with status', response.status)
+    const data = await response.json()
+    console.log('[db] testConnection: got data', data)
+    return { success: true, data }
+  } catch (e) {
+    console.error('[db] testConnection exception:', e)
+    return { success: false, error: e.message }
+  }
+}
+
 // ─── Row mapper ────────────────────────────────────────────────────────────────
 
 const STATUS_MAP = {
@@ -55,14 +80,28 @@ const TURN_SELECT = `
 // ─── Queries ───────────────────────────────────────────────────────────────────
 
 export async function fetchTurns() {
-  const { data, error } = await supabase
-    .from('turnos')
-    .select(TURN_SELECT)
-    .in('estado', ['espera', 'llamado', 'diferido', 'atendido', 'noshow'])
-    .order('created_at', { ascending: false })
-    .limit(200)
-  if (error) throw error
-  return data.map(mapTurnRow)
+  console.log('[db] fetchTurns: starting...')
+  try {
+    console.log('[db] fetchTurns: about to call supabase.from("turnos")')
+    const query = supabase
+      .from('turnos')
+      .select(TURN_SELECT)
+      .in('estado', ['espera', 'llamado', 'diferido', 'atendido', 'noshow'])
+      .order('created_at', { ascending: false })
+      .limit(200)
+    console.log('[db] fetchTurns: query built, now awaiting...')
+    const { data, error } = await query
+    console.log('[db] fetchTurns: got response', { hasData: !!data, hasError: !!error })
+    if (error) {
+      console.error('[db] fetchTurns error:', error)
+      throw error
+    }
+    console.log('[db] fetchTurns: completed, rows:', data?.length)
+    return data.map(mapTurnRow)
+  } catch (e) {
+    console.error('[db] fetchTurns exception:', e)
+    throw e
+  }
 }
 
 export async function fetchSingleTurn(uuid) {
@@ -76,80 +115,126 @@ export async function fetchSingleTurn(uuid) {
 }
 
 export async function fetchConditions() {
-  const { data, error } = await supabase
-    .from('condiciones_especiales')
-    .select('id, nombre, icono, orden')
-    .eq('activa', true)
-    .order('orden')
-  if (error) throw error
-  return data
+  console.log('[db] fetchConditions: starting...')
+  try {
+    console.log('[db] fetchConditions: querying...')
+    const { data, error } = await supabase
+      .from('condiciones_especiales')
+      .select('id, nombre, icono, orden')
+      .eq('activa', true)
+      .order('orden')
+    console.log('[db] fetchConditions: got response', { hasData: !!data, hasError: !!error })
+    if (error) throw error
+    console.log('[db] fetchConditions: completed, rows:', data?.length)
+    return data
+  } catch (e) {
+    console.error('[db] fetchConditions exception:', e)
+    throw e
+  }
 }
 
 export async function fetchServices() {
-  const { data, error } = await supabase
-    .from('servicios')
-    .select('id, nombre, nombre_corto, prefijo_turno, color_token, icono_codigo, orden_kiosk')
-    .eq('estado', 'activo')
-    .order('orden_kiosk')
-  if (error) throw error
-  return data
+  console.log('[db] fetchServices: starting...')
+  try {
+    console.log('[db] fetchServices: querying...')
+    const { data, error } = await supabase
+      .from('servicios')
+      .select('id, nombre, nombre_corto, prefijo_turno, color_token, icono_codigo, orden_kiosk')
+      .eq('estado', 'activo')
+      .order('orden_kiosk')
+    console.log('[db] fetchServices: got response', { hasData: !!data, hasError: !!error })
+    if (error) throw error
+    console.log('[db] fetchServices: completed, rows:', data?.length)
+    return data
+  } catch (e) {
+    console.error('[db] fetchServices exception:', e)
+    throw e
+  }
 }
 
 export async function fetchCounters() {
-  const [{ data: counters, error: ce }, { data: activeTurnos, error: te }] = await Promise.all([
-    supabase
-      .from('ventanillas')
-      .select('id, numero, etiqueta, estado, agente_id, es_prioritaria, ventanilla_servicios(servicio_id)')
-      .order('numero'),
-    supabase
-      .from('turnos')
-      .select('id, ventanilla_id')
-      .eq('estado', 'llamado'),
-  ])
-  if (ce) throw ce
-  if (te) throw te
+  console.log('[db] fetchCounters: starting...')
+  try {
+    console.log('[db] fetchCounters: building parallel queries')
+    const [{ data: counters, error: ce }, { data: activeTurnos, error: te }] = await Promise.all([
+      (async () => {
+        console.log('[db] fetchCounters: querying ventanillas')
+        return await supabase
+          .from('ventanillas')
+          .select('id, numero, etiqueta, estado, agente_id, es_prioritaria, ventanilla_servicios(servicio_id)')
+          .order('numero')
+      })(),
+      (async () => {
+        console.log('[db] fetchCounters: querying active turnos')
+        return await supabase
+          .from('turnos')
+          .select('id, ventanilla_id')
+          .eq('estado', 'llamado')
+      })(),
+    ])
+    console.log('[db] fetchCounters: got response', { hasCounters: !!counters, hasTurnos: !!activeTurnos, ce, te })
+    if (ce) throw ce
+    if (te) throw te
 
-  const activeMap = Object.fromEntries(
-    (activeTurnos ?? []).map(t => [t.ventanilla_id, t.id])
-  )
+    const activeMap = Object.fromEntries(
+      (activeTurnos ?? []).map(t => [t.ventanilla_id, t.id])
+    )
 
-  return (counters ?? []).map(row => ({
-    id:            row.id,
-    numero:        row.numero,
-    label:         row.etiqueta,
-    status:        row.estado === 'activa' ? 'active' : 'inactive',
-    esPrioritaria: row.es_prioritaria ?? false,
-    serviceIDs:    (row.ventanilla_servicios ?? []).map(vs => vs.servicio_id),
-    currentTurnId: activeMap[row.id] ?? null,
-  }))
+    const result = (counters ?? []).map(row => ({
+      id:            row.id,
+      numero:        row.numero,
+      label:         row.etiqueta,
+      status:        row.estado === 'activa' ? 'active' : 'inactive',
+      esPrioritaria: row.es_prioritaria ?? false,
+      serviceIDs:    (row.ventanilla_servicios ?? []).map(vs => vs.servicio_id),
+      currentTurnId: activeMap[row.id] ?? null,
+    }))
+    console.log('[db] fetchCounters: completed, counters:', result.length)
+    return result
+  } catch (e) {
+    console.error('[db] fetchCounters exception:', e)
+    throw e
+  }
 }
 
 // ─── Mutations ─────────────────────────────────────────────────────────────────
 
 export async function insertTurn({ serviceId, patientName, idNumber, condicionIds }) {
+  console.log('[db] insertTurn: starting...', { serviceId, patientName, idNumber, condicionIds })
   const prioridad = condicionIds?.length ? 'especial' : 'regular'
+  const payload = {
+    servicio_id:        serviceId,
+    prioridad,
+    estado:             'espera',
+    paciente_nombre:    patientName || null,
+    paciente_id_number: idNumber || null,
+    call_count:         0,
+    call_log:           [],
+    reinstated:         false,
+    no_show_occurred:   false,
+    // numero is NOT sent — DB trigger fn_generate_turno_numero() sets it automatically
+  }
+  console.log('[db] insertTurn: payload', payload)
   const { data, error } = await supabase
     .from('turnos')
-    .insert({
-      servicio_id:        serviceId,
-      prioridad,
-      estado:             'espera',
-      paciente_nombre:    patientName || null,
-      paciente_id_number: idNumber || null,
-      call_count:         0,
-      call_log:           [],
-      reinstated:         false,
-      no_show_occurred:   false,
-    })
+    .insert(payload)
     .select('id, numero')
     .single()
-  if (error) throw error
+  console.log('[db] insertTurn: response', { data, error })
+  if (error) {
+    console.error('[db] insertTurn error:', error)
+    throw error
+  }
 
   if (condicionIds?.length) {
-    await supabase.from('turno_condiciones').insert(
+    console.log('[db] insertTurn: inserting condiciones...', condicionIds)
+    const { error: condError } = await supabase.from('turno_condiciones').insert(
       condicionIds.map(cid => ({ turno_id: data.id, condicion_id: cid }))
     )
+    if (condError) console.error('[db] insertTurn condiciones error:', condError)
   }
+
+  console.log('[db] insertTurn: completed', data)
   return data
 }
 

@@ -1,12 +1,32 @@
 <script setup>
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocaleStore } from '@/locale.js'
+import { testConnection } from '@/lib/db.js'
 
 const router = useRouter()
 const locale = useLocaleStore()
+const testResult = ref(null)
+const testLoading = ref(false)
 
 function openScreen(path) {
   router.push(path)
+}
+
+async function runConnectionTest() {
+  testLoading.value = true
+  testResult.value = null
+  console.log('[Launcher] Running connection test...')
+  try {
+    const result = await testConnection()
+    testResult.value = result
+    console.log('[Launcher] Test result:', result)
+  } catch (e) {
+    testResult.value = { success: false, error: e.message }
+    console.error('[Launcher] Test error:', e)
+  } finally {
+    testLoading.value = false
+  }
 }
 </script>
 
@@ -83,6 +103,17 @@ function openScreen(path) {
         <span class="footer-sep">·</span>
         <span>Vue 3 + Pinia · WCAG 2.1 AA</span>
       </footer>
+
+      <!-- Debug section -->
+      <div class="debug-section">
+        <button class="debug-btn" @click="runConnectionTest" :disabled="testLoading">
+          {{ testLoading ? 'Testing...' : 'Test Supabase Connection' }}
+        </button>
+        <div v-if="testResult" class="debug-result" :class="{ 'debug-result--success': testResult.success }">
+          <div class="debug-result-status">{{ testResult.success ? '✓ Success' : '✗ Failed' }}</div>
+          <pre class="debug-result-details">{{ JSON.stringify(testResult, null, 2) }}</pre>
+        </div>
+      </div>
 
     </div>
   </div>
@@ -291,5 +322,71 @@ function openScreen(path) {
 
 .footer-sep {
   opacity: 0.4;
+}
+
+/* ── Debug section ─────────────────────────────────────────────────────── */
+.debug-section {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.debug-btn {
+  font-family: 'Figtree', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(240, 164, 41, 0.3);
+  background-color: rgba(240, 164, 41, 0.1);
+  color: #F0A429;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.debug-btn:hover:not(:disabled) {
+  background-color: rgba(240, 164, 41, 0.15);
+  border-color: rgba(240, 164, 41, 0.5);
+}
+
+.debug-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.debug-result {
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 59, 59, 0.3);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.debug-result--success {
+  border-color: rgba(32, 203, 139, 0.3);
+}
+
+.debug-result-status {
+  font-family: 'Figtree', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #FF3B3B;
+}
+
+.debug-result--success .debug-result-status {
+  color: #20CB8B;
+}
+
+.debug-result-details {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+  margin: 0;
+  color: rgba(238, 243, 255, 0.5);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>
