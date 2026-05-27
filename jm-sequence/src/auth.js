@@ -121,5 +121,5 @@ export const useAuthStore = defineStore('auth', () => {
     await supabase.auth.signOut({ scope: 'local' })
   }
 
-  return { user, profile, init, cleanup, login, logout }
+  return { user, profile, init, cleanup, login, logout, fetchProfile }
 })

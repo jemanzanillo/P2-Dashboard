@@ -24,7 +24,15 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (to.meta.requiresAuth && !auth.user)
     return { path: '/login', query: { redirect: to.fullPath } }
-  if (to.meta.requiresAdmin && auth.profile?.rol !== 'admin') return '/agent'
+  if (to.meta.requiresAdmin) {
+    // Profile is fetched asynchronously after the auth session is restored.
+    // On a hard refresh the guard may run before fetchProfile() has resolved,
+    // so auth.profile is null even though the user is an admin.  Wait for it.
+    if (auth.user && !auth.profile) {
+      try { await auth.fetchProfile() } catch {}
+    }
+    if (auth.profile?.rol !== 'admin') return '/agent'
+  }
 })
 
 export default router

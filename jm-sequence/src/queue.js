@@ -42,7 +42,13 @@ export const useQueueStore = defineStore('queue', () => {
   function handleTurnoEvent({ eventType, new: newRow, old: oldRow }) {
     if (eventType === 'INSERT') {
       fetchSingleTurn(newRow.id).then(turn => {
-        if (turn) turns.value.push(turn)
+        if (!turn) return
+        // Deduplicate: the DB trigger (fn_generate_turno_numero) fires an UPDATE
+        // immediately after INSERT, and both async fetches may race. Only push if
+        // the UPDATE handler hasn't already added this turn.
+        if (!turns.value.some(t => t.dbId === newRow.id)) {
+          turns.value.push(turn)
+        }
       })
       return
     }
@@ -57,7 +63,7 @@ export const useQueueStore = defineStore('queue', () => {
           turns.value.push(turn)
         }
 
-        // Keep activeTurn in sync
+        // Keep activeTurn in sync for the agent (only their own active turn)
         if (activeTurn.value?.dbId === newRow.id) {
           if (['attended', 'skipped', 'cancelled', 'deferred'].includes(turn.status)) {
             activeTurn.value = null
@@ -66,10 +72,18 @@ export const useQueueStore = defineStore('queue', () => {
           }
         }
 
-        // Increment callSeq so FOH announces — only on first call or recall
+        // FOH has no assigned counter (agentCounterId == null).
+        // Track whichever turn was most recently called so the FOH panel stays populated.
+        if (agentCounterId.value == null && turn.status === 'called') {
+          activeTurn.value = { ...turn }
+        }
+
+        // Increment callSeq to trigger FOH chime + TTS announcements.
+        // Agent stores: only for their counter. FOH store (no counter): for all counters.
         const firstCall = oldRow?.called_at == null && newRow?.called_at != null
         const isRecall  = newRow?.call_count > (oldRow?.call_count ?? 0) && oldRow?.called_at != null
-        if ((firstCall || isRecall) && agentCounterId.value != null && turn.counterId === agentCounterId.value) {
+        const counterMatches = agentCounterId.value == null || turn.counterId === agentCounterId.value
+        if ((firstCall || isRecall) && counterMatches) {
           callSeq.value++
         }
       })
@@ -186,6 +200,10 @@ export const useQueueStore = defineStore('queue', () => {
 
   function cleanup() {
     if (_unsubscribe) { _unsubscribe(); _unsubscribe = null }
+    // Reset so the next view that calls init() gets a fresh subscription.
+    // Without this, navigating agent → kiosk → agent in the same browser
+    // leaves the store "initialized" with a dead Realtime channel.
+    initialized.value = false
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
