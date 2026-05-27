@@ -8,11 +8,34 @@ const TTS_DELAY_MS  = Math.round(CHIME_TOTAL * 1000) + 300  // chime + 300ms bre
 
 export function useTurnAnnouncer() {
   const audioReady = ref(false)
+  const voicesReady = ref(false)
   let ctx = null
   let pendingAnnounce = null   // queued call while ctx is suspended
+  let voiceListenerInit = false
+
+  function initVoiceListener() {
+    if (voiceListenerInit) return
+    voiceListenerInit = true
+
+    window.speechSynthesis.onvoiceschanged = () => {
+      const voices = window.speechSynthesis.getVoices()
+      voicesReady.value = voices.length > 0
+      if (voices.length > 0) {
+        console.debug('[TTS] Voices loaded:', voices.length)
+      }
+    }
+
+    // Trigger initial check
+    const initialVoices = window.speechSynthesis.getVoices()
+    voicesReady.value = initialVoices.length > 0
+    if (initialVoices.length > 0) {
+      console.debug('[TTS] Initial voices available:', initialVoices.length)
+    }
+  }
 
   function getContext() {
     if (!ctx) {
+      initVoiceListener()
       ctx = new (window.AudioContext || window.webkitAudioContext)()
       ctx.onstatechange = () => {
         audioReady.value = ctx.state === 'running'
@@ -60,26 +83,68 @@ export function useTurnAnnouncer() {
 
   function pickVoice() {
     const voices = window.speechSynthesis.getVoices()
+    if (voices.length === 0) {
+      console.warn('[TTS] No voices available on this device', {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+      })
+      return null
+    }
+
     // Prefer female Latin American Spanish, fall back to any Spanish
     const ranked = [
       voices.find(v => v.lang.startsWith('es-419') && v.name.toLowerCase().includes('female')),
       voices.find(v => v.lang.startsWith('es-419')),
       voices.find(v => v.lang.startsWith('es') && v.name.toLowerCase().includes('female')),
       voices.find(v => v.lang.startsWith('es')),
+      voices[0], // Fallback to first available voice
     ]
-    return ranked.find(Boolean) ?? null
+    const selected = ranked.find(Boolean) ?? null
+    if (!selected) {
+      console.warn('[TTS] No Spanish voice found; available voices:', voices.map(v => `${v.lang}/${v.name}`))
+    }
+    return selected
   }
 
   function speak(turn) {
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(buildText(turn))
-    utterance.lang   = 'es-419'
-    utterance.rate   = 0.88
-    utterance.pitch  = 1.05
-    utterance.volume = 1.0
-    const voice = pickVoice()
-    if (voice) utterance.voice = voice
-    window.speechSynthesis.speak(utterance)
+    try {
+      window.speechSynthesis.cancel()
+      const text = buildText(turn)
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.lang   = 'es-419'
+      utterance.rate   = 0.88
+      utterance.pitch  = 1.05
+      utterance.volume = 1.0
+
+      const voice = pickVoice()
+      if (voice) {
+        utterance.voice = voice
+      }
+
+      utterance.onerror = (evt) => {
+        console.warn('[TTS] Error during speech synthesis', {
+          error: evt.error,
+          userAgent: navigator.userAgent,
+          voicesAvailable: window.speechSynthesis.getVoices().length,
+          text: text.substring(0, 50),
+        })
+      }
+
+      utterance.onstart = () => {
+        console.debug('[TTS] Speech started')
+      }
+
+      utterance.onend = () => {
+        console.debug('[TTS] Speech ended')
+      }
+
+      window.speechSynthesis.speak(utterance)
+    } catch (err) {
+      console.error('[TTS] Exception during speech synthesis', {
+        error: err.message,
+        stack: err.stack,
+      })
+    }
   }
 
   function _doAnnounce(turn, isRecall) {
@@ -109,5 +174,5 @@ export function useTurnAnnouncer() {
     }
   }
 
-  return { audioReady, announce, requestAudioPermission }
+  return { audioReady, voicesReady, announce, requestAudioPermission }
 }
