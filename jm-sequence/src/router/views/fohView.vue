@@ -142,7 +142,7 @@ import FohVideoPlayer from '@/components/FohVideoPlayer.vue'
 
 const store  = useQueueStore()
 const locale = useLocaleStore()
-const { announce, audioReady, requestAudioPermission } = useTurnAnnouncer()
+const { announce, audioReady, requestAudioPermission, dispose } = useTurnAnnouncer()
 
 // Guard: skip announcing the turn that was already active when the page loads
 const mountComplete = ref(false)
@@ -181,7 +181,8 @@ function updateClock() {
   currentTime.value = `${h12}:${m}:${s} ${ampm}`
 }
 
-let _offAnnounce = null
+let _offAnnounce  = null
+let _resyncTimer  = null   // Gap C: periodic safety-net resync for always-on TV
 
 onMounted(async () => {
   // FOH is a public screen — initialize the queue store directly if no
@@ -206,12 +207,19 @@ onMounted(async () => {
 
   updateClock()
   clockTimer = setInterval(updateClock, 1000)
+
+  // Gap C: FOH TV never triggers visibilitychange or online events (always
+  // fullscreen, always connected). Force a full resync every 5 min so a
+  // single dropped Realtime event can't leave the display stale all shift.
+  _resyncTimer = setInterval(() => store.resyncFromServer(), 5 * 60_000)
 })
 
 onUnmounted(() => {
   clearInterval(clockTimer)
+  clearInterval(_resyncTimer)
   window.removeEventListener('resize', updateScale)
   _offAnnounce?.()
+  dispose()   // tears down AudioContext + both keepalive timers
 })
 
 // Last 8 non-waiting turns — includes 'called' so patients can catch up

@@ -699,6 +699,7 @@ export const useQueueStore = defineStore('queue', () => {
     init,
     cleanup,
     setCounter,
+    resyncFromServer,
     callNext,
     recallTurn,
     finishTurn,

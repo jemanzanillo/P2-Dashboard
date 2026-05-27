@@ -12,6 +12,8 @@ export function useTurnAnnouncer() {
   let ctx = null
   let pendingAnnounce = null   // queued call while ctx is suspended
   let voiceListenerInit = false
+  let _keepaliveTimer    = null   // Gap A: prevent AudioContext auto-suspend
+  let _ttsKeepaliveTimer = null   // Gap B: prevent Chrome speechSynthesis stall
 
   function initVoiceListener() {
     if (voiceListenerInit) return
@@ -44,6 +46,23 @@ export function useTurnAnnouncer() {
           pendingAnnounce = null
           fn()
         }
+      }
+
+      // Gap A: browsers auto-suspend AudioContext after inactivity. Only the
+      // initial creation requires a user gesture; subsequent resume() calls
+      // from an interval are allowed. Poll every 30 s and resume if suspended.
+      if (!_keepaliveTimer) {
+        _keepaliveTimer = setInterval(() => {
+          if (ctx && ctx.state !== 'running') ctx.resume()
+        }, 30_000)
+      }
+
+      // Gap B: Chrome silently stops delivering TTS after ~15 min of silence.
+      // A periodic cancel() pokes the synthesis engine and resets its idle timer.
+      if (!_ttsKeepaliveTimer) {
+        _ttsKeepaliveTimer = setInterval(() => {
+          window.speechSynthesis.cancel()
+        }, 10 * 60_000)
       }
     }
     audioReady.value = ctx.state === 'running'
@@ -174,5 +193,14 @@ export function useTurnAnnouncer() {
     }
   }
 
-  return { audioReady, voicesReady, announce, requestAudioPermission }
+  // Tear down keepalive timers and close the AudioContext when the FOH view
+  // unmounts. Prevents ghost intervals if the component is ever remounted.
+  function dispose() {
+    clearInterval(_keepaliveTimer);    _keepaliveTimer    = null
+    clearInterval(_ttsKeepaliveTimer); _ttsKeepaliveTimer = null
+    if (ctx) { ctx.close(); ctx = null }
+    audioReady.value = false
+  }
+
+  return { audioReady, voicesReady, announce, requestAudioPermission, dispose }
 }
