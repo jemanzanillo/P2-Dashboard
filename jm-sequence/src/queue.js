@@ -426,9 +426,22 @@ export const useQueueStore = defineStore('queue', () => {
       error.value = e.message
       return
     }
+    // Timeout: the DB may or may not have applied the write. Fetch the canonical
+    // row and compare against what we expected. If the DB state matches what we
+    // optimistically applied, keep it; if the DB still shows the pre-mutation
+    // state (write didn't go through), roll back so the agent isn't stuck.
     try {
       const fresh = await fetchSingleTurn(dbId)
       if (!fresh) { restoreSnapshot(snap); return }
+
+      // If the DB row status still matches the snapshot (pre-mutation state),
+      // the write failed — restore so the agent can retry cleanly.
+      const dbMatchesPreMutation = fresh.status === snap.turnRow?.status
+      if (dbMatchesPreMutation) {
+        restoreSnapshot(snap)
+        return
+      }
+
       const idx = turns.value.findIndex(t => t.dbId === dbId)
       if (idx >= 0) turns.value[idx] = fresh
       if (activeTurn.value?.dbId === dbId) activeTurn.value = { ...fresh }
