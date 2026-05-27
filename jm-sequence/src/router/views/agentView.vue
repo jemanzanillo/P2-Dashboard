@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQueueStore } from '@/queue.js'
 import { useAuthStore } from '@/auth'
@@ -11,9 +11,14 @@ const router = useRouter()
 const locale = useLocaleStore()
 
 async function logout() {
-    // App.vue's auth.user watcher calls store.cleanup() on SIGNED_OUT —
-    // we don't kill the store from here or we'd race with that handler.
-    await auth.logout()
+    try {
+        // App.vue's auth.user watcher calls store.cleanup() on SIGNED_OUT —
+        // we don't kill the store from here or we'd race with that handler.
+        await auth.logout()
+    } catch (e) {
+        console.error('[agentView] logout failed:', e)
+    }
+    // Always navigate to login, regardless of logout success/failure
     router.push('/login')
 }
 
@@ -63,6 +68,7 @@ onMounted(async () => {
 onUnmounted(() => {
     clearInterval(clockTimer)
     clearInterval(elapsedTimer)
+    clearTimeout(_errorTimeout)
     // Don't tear down the queue store on view unmount — the user may just be
     // navigating to /admin. App.vue owns store lifetime via the auth watcher.
 })
@@ -161,6 +167,26 @@ const rtBadgeLabel = computed(() => {
     return locale.t('agent.realtime.reconnecting')
 })
 const rtBadgeTitle = computed(() => `Realtime: ${store.realtimeStatus}`)
+
+// ── Offline banner ────────────────────────────────────────────────────────────
+// Show a prominent banner whenever Realtime is not healthy. IDLE is the
+// pre-init state — suppress it so there's no flash on load.
+const showOfflineBanner = computed(() =>
+    ['RECONNECTING', 'TIMED_OUT', 'CHANNEL_ERROR', 'CLOSED'].includes(store.realtimeStatus)
+)
+
+// ── Action error toast ────────────────────────────────────────────────────────
+// store.error is set by queue.js when any DB mutation fails and rolls back.
+// Without this watcher the agent sees a silent snap-back with no explanation.
+const actionError = ref(null)
+let _errorTimeout = null
+
+watch(() => store.error, (err) => {
+    if (!err) return
+    actionError.value = err
+    clearTimeout(_errorTimeout)
+    _errorTimeout = setTimeout(() => { actionError.value = null }, 4000)
+})
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 const agentCounter = computed(() =>
@@ -280,6 +306,12 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
             </div>
         </header>
 
+        <div v-if="showOfflineBanner" class="offline-banner" role="alert" aria-live="assertive">
+            <span aria-hidden="true">⚠</span>
+            <span v-if="store.realtimeStatus === 'CLOSED'">Desconectado — sin actualización en tiempo real. Recarga si el problema persiste.</span>
+            <span v-else>Reconectando… Los datos mostrados pueden no estar actualizados.</span>
+        </div>
+
         <section class="boh-content">
 
             <div class="main-screen">
@@ -353,6 +385,10 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                     <span v-if="lastCallTime" class="call-time"> · {{ lastCallTime }}</span>
                 </p>
 
+                </div>
+
+                <div v-if="actionError" class="action-error" role="alert" aria-live="assertive">
+                    <span aria-hidden="true">⚠</span> Error al guardar los cambios — por favor intenta de nuevo.
                 </div>
 
                 <div class="turn-summary" v-if="store.activeTurn">
@@ -717,6 +753,42 @@ p {
     0%   { box-shadow: 0 0 0 0 rgba(32, 203, 139, 0.5); }
     70%  { box-shadow: 0 0 0 6px rgba(32, 203, 139, 0);   }
     100% { box-shadow: 0 0 0 0 rgba(32, 203, 139, 0);     }
+}
+
+/* ── Offline banner ──────────────────────────────────────────────────────── */
+.offline-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #FEF3C7;
+    border-bottom: 1px solid rgba(245, 158, 11, 0.45);
+    color: #92400E;
+    font-family: 'Figtree', sans-serif;
+    font-size: clamp(12px, 1.1vw, 14px);
+    font-weight: 500;
+    padding: 7px 16px;
+    flex-shrink: 0;
+    text-align: center;
+}
+
+/* ── Action error toast ──────────────────────────────────────────────────── */
+.action-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(245, 158, 11, 0.10);
+    border: 1px solid rgba(245, 158, 11, 0.40);
+    border-radius: 8px;
+    color: #92400E;
+    font-family: 'Figtree', sans-serif;
+    font-size: clamp(12px, 1.1vw, 14px);
+    font-weight: 500;
+    padding: 10px 16px;
+    width: min(480px, 80%);
+    text-align: center;
+    flex-shrink: 0;
 }
 
 .logo-image {

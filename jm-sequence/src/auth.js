@@ -48,12 +48,21 @@ export const useAuthStore = defineStore('auth', () => {
       }
 
       if (event === 'SIGNED_OUT') {
-        // Only honor SIGNED_OUT if this tab explicitly called logout(). Cross-tab
-        // SIGNED_OUT events (e.g. from another user's login flow triggering a
-        // session replacement) must be ignored to keep this agent's session alive.
         if (!_pendingSignOut) {
-          console.warn('[auth] Ignoring cross-tab SIGNED_OUT (not initiated from this tab)')
-          return
+          // Before ignoring, verify a session still exists. A cross-tab
+          // login-override emits SIGNED_OUT but leaves a new valid session in
+          // localStorage; a genuine refresh-token expiry (7-day TTL or revoked)
+          // leaves no session at all. This distinguishes the two cases.
+          try {
+            const { data } = await supabase.auth.getSession()
+            if (data.session) {
+              console.warn('[auth] Ignoring cross-tab SIGNED_OUT — session still valid for:', data.session.user?.email)
+              return
+            }
+          } catch (e) {
+            console.warn('[auth] getSession check during SIGNED_OUT failed:', e.message)
+          }
+          console.warn('[auth] Genuine session expiry detected — clearing user')
         }
         _pendingSignOut = false
         user.value    = null
