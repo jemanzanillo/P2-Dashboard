@@ -95,9 +95,6 @@ export const useQueueStore = defineStore('queue', () => {
     try {
       console.log('[queue] init: starting...')
 
-      // Clear any corrupted session from localStorage that might cause hangs
-      clearCorruptedSession()
-
       // Test connection first
       console.log('[queue] init: testing connection...')
       const connTest = await testConnection()

@@ -20,42 +20,58 @@ export const useAuthStore = defineStore('auth', () => {
     if (_initialized) return
     _initialized = true
 
-    // Await INITIAL_SESSION so the router guard sees the correct auth state
-    // before the first route renders. We only resolve on INITIAL_SESSION —
-    // later events (SIGNED_IN, SIGNED_OUT) are handled by the same listener
-    // but don't block mount. fetchProfile is wrapped so a DB/RLS error never
-    // leaves the Promise permanently pending (blank page).
+    // ── Phase 1: instant optimistic restore from localStorage ─────────────────
+    // Read the raw session synchronously so the router guard passes on refresh
+    // without waiting for a network round-trip to Supabase.
+    const storedSession = _readStoredSession()
+    if (storedSession?.user) {
+      user.value = storedSession.user
+      console.log('[auth] Optimistic restore from localStorage:', user.value?.email)
+    }
+
+    // ── Phase 2: real validation via SDK (async, may trigger token refresh) ───
+    // Register the listener before anything else so no event is missed.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('[auth] onAuthStateChange:', event, { hasSession: !!session })
+      user.value = session?.user ?? null
+      if (user.value) {
+        try { await fetchProfile() } catch (e) { console.error('[auth] fetchProfile:', e) }
+      } else {
+        profile.value = null
+      }
+    })
+    _unsubscribe = () => subscription.unsubscribe()
+
+    // Wait for INITIAL_SESSION with a generous timeout.
+    // If it times out, the optimistic value from Phase 1 remains —
+    // the user stays on-screen and the SDK keeps validating in the background.
     await Promise.race([
       new Promise((resolve) => {
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-          user.value = session?.user ?? null
-          if (user.value) {
-            try { await fetchProfile() } catch (e) { console.error('[auth] fetchProfile:', e) }
-          } else {
-            profile.value = null
-          }
-          if (event === 'INITIAL_SESSION') {
-            // Validate the session is actually usable
-            console.log('[auth] INITIAL_SESSION:', { hasUser: !!user.value, hasSession: !!session })
-            if (user.value && session?.access_token) {
-              // Session restored successfully
-              console.log('[auth] Session restored from storage')
-            } else if (user.value && !session?.access_token) {
-              // User exists but no valid token — session is corrupted
-              console.warn('[auth] Session restored but no valid token — clearing')
-              user.value = null
-              profile.value = null
-            }
-            resolve()
-          }
+        const { data: { subscription: s2 } } = supabase.auth.onAuthStateChange((event) => {
+          if (event === 'INITIAL_SESSION') { s2.unsubscribe(); resolve() }
         })
-        _unsubscribe = () => subscription.unsubscribe()
       }),
-      new Promise((resolve) => setTimeout(() => resolve(), 3000)) // 3s timeout
+      new Promise((resolve) => setTimeout(resolve, 8000)),
     ])
 
-    // Start background session check to keep token fresh
+    // Start background token refresh to keep agents logged in all day
     _startSessionCheck()
+  }
+
+  // Read stored Supabase session directly from localStorage — no network, instant
+  function _readStoredSession() {
+    try {
+      // Supabase v2 stores the session under this key pattern
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+          const raw = localStorage.getItem(key)
+          if (raw) return JSON.parse(raw)
+        }
+      }
+    } catch (e) {
+      console.warn('[auth] Could not parse stored session:', e.message)
+    }
+    return null
   }
 
   function cleanup() {
