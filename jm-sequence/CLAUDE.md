@@ -168,25 +168,25 @@ turno_condiciones[]   // join → condiciones_especiales (nombre, icono)
 
 ### DB Tables (Supabase PostgreSQL)
 ```
-turnos            id (uuid), numero, servicio_id, ventanilla_id, prioridad,
-                  estado, paciente_nombre, paciente_id_number,
+turnos            id (uuid), numero, servicio_id (uuid), ventanilla_id (integer FK → ventanillas.id),
+                  prioridad, estado, paciente_nombre, paciente_id_number,
                   created_at, called_at, atencion_inicio_at, finished_at,
                   call_count, call_log, reinstated,
                   no_show_occurred, no_show_override,
                   puede_atender_desde, tiempo_espera_segundos,
                   tiempo_atencion_segundos, motivo_anulacion
 
-turno_condiciones turno_id, condicion_id  ← many-to-many join
+turno_condiciones turno_id (uuid), condicion_id (uuid)  ← many-to-many join
 
-condiciones_especiales  id, nombre, icono  ← e.g. Embarazada, Adulto mayor, Discapacitado
+condiciones_especiales  id (uuid), nombre, icono  ← e.g. Embarazada, Adulto mayor, Discapacitado
 
-ventanillas       id (uuid), numero, etiqueta, estado (activa|inactiva),
+ventanillas       id (integer PK), numero (integer), etiqueta, estado (activa|inactiva),
                   agente_id, es_prioritaria
 
-servicios         id, nombre, nombre_corto, prefijo_turno, color_token
+servicios         id (uuid), nombre, nombre_corto, prefijo_turno, color_token
 
-profiles          id (= auth.users.id), nombre, rol (agente|admin),
-                  ventanilla_id, → ventanillas(*)
+profiles          id (= auth.users.id, uuid), nombre, rol (agente|admin),
+                  ventanilla_id (integer FK → ventanillas.id), → ventanillas(*)
 ```
 
 ### Key db.js functions

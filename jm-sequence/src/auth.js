@@ -15,6 +15,7 @@ export const useAuthStore = defineStore('auth', () => {
   let _initialized  = false
   let _unsubscribe  = null
   let _sessionCheckInterval = null
+  let _onVisibilityChange   = null
 
   async function init() {
     if (_initialized) return
@@ -31,8 +32,14 @@ export const useAuthStore = defineStore('auth', () => {
 
     // ── Phase 2: real validation via SDK (async, may trigger token refresh) ───
     // Register the listener before anything else so no event is missed.
+    // Handles SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, INITIAL_SESSION, USER_UPDATED.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('[auth] onAuthStateChange:', event, { hasSession: !!session })
+      if (event === 'SIGNED_OUT') {
+        user.value    = null
+        profile.value = null
+        return
+      }
       user.value = session?.user ?? null
       if (user.value) {
         try { await fetchProfile() } catch (e) { console.error('[auth] fetchProfile:', e) }
@@ -42,17 +49,27 @@ export const useAuthStore = defineStore('auth', () => {
     })
     _unsubscribe = () => subscription.unsubscribe()
 
-    // Wait for INITIAL_SESSION with a generous timeout.
-    // If it times out, the optimistic value from Phase 1 remains —
-    // the user stays on-screen and the SDK keeps validating in the background.
-    await Promise.race([
-      new Promise((resolve) => {
-        const { data: { subscription: s2 } } = supabase.auth.onAuthStateChange((event) => {
-          if (event === 'INITIAL_SESSION') { s2.unsubscribe(); resolve() }
-        })
-      }),
-      new Promise((resolve) => setTimeout(resolve, 8000)),
-    ])
+    // When the tab returns to the foreground, browsers may have throttled our
+    // setInterval-based refresh — proactively re-check the session and refresh
+    // if the access token is close to expiry. This is what keeps an idle FOH/TV
+    // or backgrounded agent tab logged in across the day.
+    _onVisibilityChange = async () => {
+      if (document.visibilityState !== 'visible') return
+      if (!user.value) return   // anonymous (FOH/kiosk) — nothing to refresh
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return
+        const expiresAtMs = (session.expires_at ?? 0) * 1000
+        const msUntilExpiry = expiresAtMs - Date.now()
+        if (msUntilExpiry < 5 * 60 * 1000) {
+          console.log('[auth] Token expiring soon — refreshing on visibility')
+          await supabase.auth.refreshSession()
+        }
+      } catch (e) {
+        console.warn('[auth] visibility refresh check failed:', e.message)
+      }
+    }
+    document.addEventListener('visibilitychange', _onVisibilityChange)
 
     // Start background token refresh to keep agents logged in all day
     _startSessionCheck()
@@ -77,6 +94,7 @@ export const useAuthStore = defineStore('auth', () => {
   function cleanup() {
     if (_unsubscribe) { _unsubscribe(); _unsubscribe = null }
     if (_sessionCheckInterval) { clearInterval(_sessionCheckInterval); _sessionCheckInterval = null }
+    if (_onVisibilityChange) { document.removeEventListener('visibilitychange', _onVisibilityChange); _onVisibilityChange = null }
     _initialized = false
   }
 
@@ -85,6 +103,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (_sessionCheckInterval) return // Already running
 
     _sessionCheckInterval = setInterval(async () => {
+      if (!user.value) return   // anonymous (FOH/kiosk) — skip
       try {
         // Quietly refresh the token to keep session alive
         const { data, error } = await supabase.auth.refreshSession()

@@ -22,7 +22,6 @@ onUnmounted(() => store.cleanup())
 <template>
   <Analytics />
   <router-view />
-  <Analytics />
 </template>
 
 <style scoped></style>

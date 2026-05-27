@@ -11,7 +11,8 @@ const router = useRouter()
 const locale = useLocaleStore()
 
 async function logout() {
-    store.cleanup()
+    // App.vue's auth.user watcher calls store.cleanup() on SIGNED_OUT —
+    // we don't kill the store from here or we'd race with that handler.
     await auth.logout()
     router.push('/login')
 }
@@ -40,14 +41,17 @@ function updateElapsed() {
 }
 
 onMounted(async () => {
-    store.agentCounterId = auth.profile?.ventanilla_id ?? null
+    // App.vue already calls store.init() when auth.user resolves; this is a
+    // safe fallback (init has an `initialized` guard). setCounter() must run
+    // AFTER init so the active-turn restore can find the counter.
     await store.init()
+    store.setCounter(auth.profile?.ventanilla_id ?? null)
 
     // If init failed due to authentication issue, redirect to login
     if (store.error && !store.initialized) {
         console.error('[agentView] Queue init failed — authentication error:', store.error)
-        store.cleanup()
-        // Don't call auth.logout() — just redirect so Supabase can handle session cleanup
+        // Don't call auth.logout() or store.cleanup() — just redirect; the auth
+        // watcher in App.vue will clean up if Supabase ends the session.
         router.push('/login?reason=auth_failed')
         return
     }
@@ -59,7 +63,8 @@ onMounted(async () => {
 onUnmounted(() => {
     clearInterval(clockTimer)
     clearInterval(elapsedTimer)
-    store.cleanup()
+    // Don't tear down the queue store on view unmount — the user may just be
+    // navigating to /admin. App.vue owns store lifetime via the auth watcher.
 })
 
 // ── 3-Call Protocol ───────────────────────────────────────────────────────────

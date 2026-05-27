@@ -4,6 +4,9 @@ import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
 export default defineConfig(({ command }) => ({
+  server: {
+    host: '0.0.0.0'
+  },
   plugins: [
     vue(),
     command === 'serve' && vueDevTools(),

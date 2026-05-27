@@ -26,20 +26,20 @@ const NAV_ITEMS = [
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(async () => {
+  // App.vue's auth watcher already triggers store.init(); this is a fallback.
   await store.init()
 
-  // If init failed due to authentication issue, redirect to login
   if (store.error && !store.initialized) {
     console.error('[adminView] Queue init failed — authentication error:', store.error)
-    store.cleanup()
-    // Don't call auth.logout() — just redirect so Supabase can handle session cleanup
     router.push('/login?reason=auth_failed')
     return
   }
 
   await loadAdminData()
 })
-onUnmounted(() => store.cleanup())
+// Don't tear down the queue store on view unmount — App.vue owns its lifetime
+// via the auth.user watcher (cleanup runs on SIGNED_OUT).
+onUnmounted(() => {})
 
 // ── Admin data ─────────────────────────────────────────────────────────────────
 const profiles    = ref([])
@@ -192,7 +192,7 @@ const userInitial = computed(() =>
 )
 
 async function logout() {
-  store.cleanup()
+  // App.vue's auth.user watcher calls store.cleanup() on SIGNED_OUT.
   await auth.logout()
   router.push('/login')
 }

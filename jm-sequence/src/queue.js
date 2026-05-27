@@ -31,36 +31,50 @@ export const useQueueStore = defineStore('queue', () => {
   const callSeq        = ref(0)
   const agentCounterId = ref(null)
 
-  const initialized = ref(false)
-  const loading     = ref(false)
-  const error       = ref(null)
+  const initialized   = ref(false)
+  const loading       = ref(false)
+  const error         = ref(null)
+  const realtimeStatus = ref('IDLE')   // IDLE | SUBSCRIBED | RECONNECTING | CHANNEL_ERROR | TIMED_OUT | CLOSED
 
-  let _unsubscribe = null
+  let _channel = null   // { unsubscribe, forceReconnect, getStatus }
+  let _onVisibilityChange = null
+  let _onOnline           = null
+  let _resyncInFlight     = false
 
   // ── Realtime handlers ──────────────────────────────────────────────────────
 
   function handleTurnoEvent({ eventType, new: newRow, old: oldRow }) {
     if (eventType === 'INSERT') {
       fetchSingleTurn(newRow.id).then(turn => {
-        if (!turn) return
+        if (!turn) { resyncFromServer(); return }
         // Deduplicate: the DB trigger (fn_generate_turno_numero) fires an UPDATE
         // immediately after INSERT, and both async fetches may race. Only push if
         // the UPDATE handler hasn't already added this turn.
         if (!turns.value.some(t => t.dbId === newRow.id)) {
           turns.value.push(turn)
         }
-      })
+      }).catch(() => resyncFromServer())
       return
     }
 
     if (eventType === 'UPDATE') {
       fetchSingleTurn(newRow.id).then(turn => {
-        if (!turn) return
+        if (!turn) { resyncFromServer(); return }
         const idx = turns.value.findIndex(t => t.dbId === newRow.id)
         if (idx >= 0) {
           turns.value[idx] = turn
         } else {
           turns.value.push(turn)
+        }
+
+        // Keep counters[].currentTurnId in sync with turn state changes.
+        // fetchCounters() only reflects 'llamado' turns at query time; without this
+        // patch, the FOH carousel stays stale after a turn is finished/cancelled.
+        if (turn.counterId) {
+          const counter = counters.value.find(c => c.id === turn.counterId)
+          if (counter) {
+            counter.currentTurnId = turn.status === 'called' ? turn.dbId : null
+          }
         }
 
         // Keep activeTurn in sync: clear it when the active turn is finished/deferred.
@@ -93,7 +107,7 @@ export const useQueueStore = defineStore('queue', () => {
         if ((firstCall || isRecall) && counterMatches) {
           callSeq.value++
         }
-      })
+      }).catch(() => resyncFromServer())
       return
     }
 
@@ -103,14 +117,46 @@ export const useQueueStore = defineStore('queue', () => {
     }
   }
 
+  // Atomic catch-up after Realtime reconnect / tab wake / online event.
+  // Replaces turns + counters with fresh server state so missed events can't leave
+  // the UI desynced. Idempotent: only one request in flight at a time.
+  async function resyncFromServer() {
+    if (_resyncInFlight) return
+    _resyncInFlight = true
+    try {
+      const [freshTurns, freshCounters] = await Promise.all([fetchTurns(), fetchCounters()])
+      turns.value    = freshTurns
+      counters.value = freshCounters
+      // Re-derive activeTurn for agents whose counter has a current call
+      if (agentCounterId.value != null) {
+        const myCounter = freshCounters.find(c => c.id === agentCounterId.value)
+        activeTurn.value = myCounter?.currentTurnId
+          ? freshTurns.find(t => t.dbId === myCounter.currentTurnId) ?? null
+          : null
+      }
+    } catch (e) {
+      console.warn('[queue] resyncFromServer failed:', e.message)
+    } finally {
+      _resyncInFlight = false
+    }
+  }
+
   function handleVentanillaEvent() {
     fetchCounters().then(data => { counters.value = data })
   }
 
   // ── Init / cleanup ─────────────────────────────────────────────────────────
 
+  let _initPromise = null   // deduplicates concurrent init() calls
+
   async function init() {
     if (initialized.value) return
+    // If an init is already in flight, wait for it instead of starting a second
+    // one. A second concurrent init() would create an orphaned Realtime channel
+    // that reconnects forever (the root cause of the SUBSCRIBED/CLOSED loop).
+    if (_initPromise) return _initPromise
+    let _resolve
+    _initPromise = new Promise(r => { _resolve = r })
     loading.value = true
     error.value   = null
     try {
@@ -160,11 +206,29 @@ export const useQueueStore = defineStore('queue', () => {
         activeTurn.value = turns.value.find(t => t.dbId === myCounter.currentTurnId) ?? null
       }
 
-      _unsubscribe = subscribeToChanges({
-        onTurnoChange:               handleTurnoEvent,
-        onVentanillaChange:          handleVentanillaEvent,
-        onVentanillaServicioChange:  async () => { counters.value = await fetchCounters() },
+      _channel = subscribeToChanges({
+        onTurnoChange:              handleTurnoEvent,
+        onVentanillaChange:         handleVentanillaEvent,
+        onVentanillaServicioChange: async () => { counters.value = await fetchCounters() },
+        onStatusChange: (status) => { realtimeStatus.value = status },
+        onResync:       () => { resyncFromServer() },
       })
+
+      // Recover from idle / network blips: when the tab comes back to the foreground
+      // or the network comes back online, force a Realtime reconnect and resync.
+      _onVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          _channel?.forceReconnect()
+          resyncFromServer()
+        }
+      }
+      _onOnline = () => {
+        _channel?.forceReconnect()
+        resyncFromServer()
+      }
+      document.addEventListener('visibilitychange', _onVisibilityChange)
+      window.addEventListener('online', _onOnline)
+
       initialized.value = true
     } catch (e) {
       error.value = e.message ?? 'Error al cargar los turnos'
@@ -202,15 +266,38 @@ export const useQueueStore = defineStore('queue', () => {
       conditions.value = []
     } finally {
       loading.value = false
+      _initPromise = null
+      _resolve?.()
     }
   }
 
   function cleanup() {
-    if (_unsubscribe) { _unsubscribe(); _unsubscribe = null }
-    // Reset so the next view that calls init() gets a fresh subscription.
-    // Without this, navigating agent → kiosk → agent in the same browser
-    // leaves the store "initialized" with a dead Realtime channel.
-    initialized.value = false
+    if (_channel) { _channel.unsubscribe(); _channel = null }
+    if (_onVisibilityChange) { document.removeEventListener('visibilitychange', _onVisibilityChange); _onVisibilityChange = null }
+    if (_onOnline)           { window.removeEventListener('online', _onOnline); _onOnline = null }
+    _initPromise = null   // allow a fresh init() after cleanup
+
+    // Reset all derived state so a subsequent init() can't inherit a stale agentCounterId
+    // (which would cause the Realtime handler to filter events for the wrong role).
+    initialized.value    = false
+    realtimeStatus.value = 'IDLE'
+    agentCounterId.value = null
+    activeTurn.value     = null
+    turns.value          = []
+    counters.value       = []
+  }
+
+  // Set the agent's assigned counter AND restore any in-progress turn for it.
+  // Use this instead of writing agentCounterId directly — assigning the ref
+  // bypasses the activeTurn restore, which left agents without their current
+  // turn after a page refresh.
+  function setCounter(id) {
+    agentCounterId.value = id ?? null
+    if (!id) { activeTurn.value = null; return }
+    const myCounter = counters.value.find(c => c.id === id)
+    if (myCounter?.currentTurnId) {
+      activeTurn.value = turns.value.find(t => t.dbId === myCounter.currentTurnId) ?? null
+    }
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
@@ -317,9 +404,19 @@ export const useQueueStore = defineStore('queue', () => {
 
   // ── Getters ────────────────────────────────────────────────────────────────
 
-  const waitingTurns = computed(() =>
-    turns.value
-      .filter(t => t.status === 'waiting' || t.status === 'deferred')
+  const waitingTurns = computed(() => {
+    // When an agent is logged in, only show turns for services their counter handles.
+    // FOH/kiosk leave agentCounterId null and see the full queue.
+    let svcFilter = null
+    if (agentCounterId.value != null) {
+      const counter = counters.value.find(c => c.id === agentCounterId.value)
+      if (counter?.serviceIDs?.length) {
+        const allowed = new Set(counter.serviceIDs)
+        svcFilter = (t) => allowed.has(t.serviceID)
+      }
+    }
+    return turns.value
+      .filter(t => (t.status === 'waiting' || t.status === 'deferred') && (!svcFilter || svcFilter(t)))
       .sort((a, b) => {
         if (a.reinstated && !b.reinstated) return -1
         if (b.reinstated && !a.reinstated) return 1
@@ -327,7 +424,7 @@ export const useQueueStore = defineStore('queue', () => {
         if (b.priority === 'special' && a.priority !== 'special') return 1
         return new Date(a.createdAt) - new Date(b.createdAt)
       })
-  )
+  })
 
   const nextTurn = computed(() => waitingTurns.value[0] || null)
 
@@ -359,9 +456,11 @@ export const useQueueStore = defineStore('queue', () => {
     initialized,
     loading,
     error,
+    realtimeStatus,
     // actions
     init,
     cleanup,
+    setCounter,
     callNext,
     recallTurn,
     finishTurn,
