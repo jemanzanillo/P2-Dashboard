@@ -716,9 +716,12 @@ export function subscribeToChanges({
       })
   }
 
+  let reconnectNeeded = false  // Flag: a reconnect was requested while rebuilding
+
   async function rebuildChannel() {
     if (rebuilding || stopped) return
     rebuilding = true
+    reconnectNeeded = false
     try {
       const old = channel
       channel = null
@@ -730,11 +733,21 @@ export function subscribeToChanges({
       if (!stopped) channel = buildChannel()
     } finally {
       rebuilding = false
+      // If a reconnect was requested while we were rebuilding, schedule it now
+      if (reconnectNeeded && !stopped) {
+        scheduleReconnect()
+      }
     }
   }
 
   function scheduleReconnect() {
-    if (stopped || reconnectTimer || rebuilding) return
+    if (stopped) return
+    // If already rebuilding, just set the flag—it will schedule after rebuild finishes
+    if (rebuilding) {
+      reconnectNeeded = true
+      return
+    }
+    if (reconnectTimer) return
     onStatusChange?.('RECONNECTING')
     const delay = backoffMs
     backoffMs = Math.min(backoffMs * 2, BACKOFF_CAP_MS)

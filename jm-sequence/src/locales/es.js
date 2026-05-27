@@ -75,6 +75,10 @@ export default {
   'kiosk.understood':       'Entendido',
 
   // ── Agent ─────────────────────────────────────────────────────────────────
+  'agent.syncing':              'Sincronizando cola…',
+  'agent.realtime.live':        'En vivo',
+  'agent.realtime.reconnecting':'Reconectando…',
+  'agent.realtime.offline':     'Sin conexión',
   'agent.systemName':        'JM Sequence — Sistema de Turnos',
   'agent.counter':           'VENTANILLA',
   'agent.callNext':          'LLAMAR SIGUIENTE',

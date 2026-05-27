@@ -149,6 +149,19 @@ function handleCtaClick() {
     store.markNoShow()
 }
 
+// ── Realtime status badge ─────────────────────────────────────────────────────
+const rtBadgeClass = computed(() => ({
+    'rt-badge--live':         store.realtimeStatus === 'SUBSCRIBED',
+    'rt-badge--reconnecting': ['RECONNECTING', 'TIMED_OUT', 'CHANNEL_ERROR'].includes(store.realtimeStatus),
+    'rt-badge--offline':      ['CLOSED', 'IDLE'].includes(store.realtimeStatus),
+}))
+const rtBadgeLabel = computed(() => {
+    if (store.realtimeStatus === 'SUBSCRIBED') return locale.t('agent.realtime.live')
+    if (['CLOSED', 'IDLE'].includes(store.realtimeStatus)) return locale.t('agent.realtime.offline')
+    return locale.t('agent.realtime.reconnecting')
+})
+const rtBadgeTitle = computed(() => `Realtime: ${store.realtimeStatus}`)
+
 // ── Computed ──────────────────────────────────────────────────────────────────
 const agentCounter = computed(() =>
     store.counters.find(c => c.id === store.agentCounterId) || null
@@ -259,6 +272,9 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                 </div>
             </div>
             <div class="header-user">
+                <span class="rt-badge" :class="rtBadgeClass" :title="rtBadgeTitle">
+                    <span class="rt-dot"></span>{{ rtBadgeLabel }}
+                </span>
                 <span class="header-username">{{ auth.profile?.nombre ?? auth.user?.email }}</span>
                 <button class="btn-logout" @click="logout">{{ locale.t('common.logout') }}</button>
             </div>
@@ -304,6 +320,11 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                             {{ locale.t('agent.availableIn') }} {{ cooldownRemaining }}s
                         </span>
 
+                        <div v-else-if="!store.activeTurn && (store.loading || !store.initialized)" class="status-container status-container--loading">
+                            <span class="skeleton-bar skeleton-bar--wide"></span>
+                            <span class="skeleton-bar skeleton-bar--narrow"></span>
+                            <span class="skeleton-label">{{ locale.t('agent.syncing') }}</span>
+                        </div>
                         <div v-else-if="!store.activeTurn" class="status-container">
                             <div class="status">
                                 <span class="btn_waiting">
@@ -666,6 +687,38 @@ p {
     border-color: rgba(238, 243, 255, 0.45);
 }
 
+/* ── Realtime status badge ─────────────────────────────────────────────── */
+.rt-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Figtree', sans-serif;
+    font-size: clamp(11px, 1vw, 13px);
+    font-weight: 500;
+    color: rgba(238, 243, 255, 0.75);
+    white-space: nowrap;
+    user-select: none;
+}
+.rt-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #6B7280;
+    flex-shrink: 0;
+}
+.rt-badge--live .rt-dot {
+    background-color: #20CB8B;
+    box-shadow: 0 0 0 0 rgba(32, 203, 139, 0.6);
+    animation: rt-pulse 2.2s ease-out infinite;
+}
+.rt-badge--reconnecting .rt-dot { background-color: #F0A429; }
+.rt-badge--offline .rt-dot      { background-color: #DC2626; }
+@keyframes rt-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(32, 203, 139, 0.5); }
+    70%  { box-shadow: 0 0 0 6px rgba(32, 203, 139, 0);   }
+    100% { box-shadow: 0 0 0 0 rgba(32, 203, 139, 0);     }
+}
+
 .logo-image {
     width: clamp(48px, 5vw, 72px);
     height: clamp(48px, 5vw, 72px);
@@ -789,6 +842,39 @@ p {
     gap: clamp(6px, 1vh, 24px);
     font-size: clamp(13px, 1.3vw, 16px);
     font-family: 'Figtree', sans-serif;
+}
+
+/* ── Loading skeleton ──────────────────────────────────────────────────── */
+.status-container--loading {
+    gap: 10px;
+    min-height: 60px;
+    justify-content: center;
+}
+.skeleton-bar {
+    display: inline-block;
+    height: 1em;
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.18),
+        rgba(255, 255, 255, 0.42),
+        rgba(255, 255, 255, 0.18)
+    );
+    background-size: 200% 100%;
+    animation: skeleton-pulse 1.4s ease-in-out infinite;
+    border-radius: 4px;
+}
+.skeleton-bar--wide   { width: 14ch; }
+.skeleton-bar--narrow { width: 8ch; }
+.skeleton-label {
+    font-family: 'Figtree', sans-serif;
+    font-size: clamp(11px, 1vw, 13px);
+    color: rgba(255, 255, 255, 0.55);
+    letter-spacing: 0.02em;
+    margin-top: 2px;
+}
+@keyframes skeleton-pulse {
+    0%   { background-position:  200% 0; }
+    100% { background-position: -200% 0; }
 }
 
 .next-details {

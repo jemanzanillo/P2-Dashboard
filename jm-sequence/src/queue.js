@@ -40,6 +40,7 @@ export const useQueueStore = defineStore('queue', () => {
   let _onVisibilityChange = null
   let _onOnline           = null
   let _resyncInFlight     = false
+  let _mutationsInFlight  = 0   // Block resync while any action is awaiting the DB
 
   // ── Realtime handlers ──────────────────────────────────────────────────────
 
@@ -122,17 +123,41 @@ export const useQueueStore = defineStore('queue', () => {
   // the UI desynced. Idempotent: only one request in flight at a time.
   async function resyncFromServer() {
     if (_resyncInFlight) return
+    // Never overwrite state while an action is awaiting the DB — the optimistic
+    // patch is intentional and the Realtime UPDATE will reconcile when it arrives
+    if (_mutationsInFlight > 0) return
     _resyncInFlight = true
+    const prevActive = activeTurn.value ? { ...activeTurn.value } : null
     try {
       const [freshTurns, freshCounters] = await Promise.all([fetchTurns(), fetchCounters()])
       turns.value    = freshTurns
       counters.value = freshCounters
-      // Re-derive activeTurn for agents whose counter has a current call
+      // Re-derive activeTurn: agents use their counter's current turn,
+      // FOH (no counter) shows whichever turn was most recently called.
+      let newActive = null
       if (agentCounterId.value != null) {
         const myCounter = freshCounters.find(c => c.id === agentCounterId.value)
-        activeTurn.value = myCounter?.currentTurnId
+        newActive = myCounter?.currentTurnId
           ? freshTurns.find(t => t.dbId === myCounter.currentTurnId) ?? null
           : null
+      } else {
+        const calledTurns = freshTurns
+          .filter(t => t.status === 'called')
+          .sort((a, b) =>
+            new Date(b.lastCalledAt || b.calledAt || 0) -
+            new Date(a.lastCalledAt || a.calledAt || 0))
+        newActive = calledTurns[0] ?? null
+      }
+      activeTurn.value = newActive
+      // Trigger announcement on FOH if resync uncovers a call the user missed
+      // (e.g., Realtime was throttled while the tab was backgrounded). Compares
+      // against the previous activeTurn to avoid double-firing announcements
+      // that already played via the normal Realtime UPDATE path.
+      if (agentCounterId.value == null && newActive) {
+        const isNewTurn   = !prevActive || prevActive.dbId !== newActive.dbId
+        const isNewRecall = prevActive?.dbId === newActive.dbId &&
+                            (newActive.callCount ?? 0) > (prevActive.callCount ?? 0)
+        if (isNewTurn || isNewRecall) callSeq.value++
       }
     } catch (e) {
       console.warn('[queue] resyncFromServer failed:', e.message)
@@ -150,7 +175,9 @@ export const useQueueStore = defineStore('queue', () => {
   let _initPromise = null   // deduplicates concurrent init() calls
 
   async function init() {
-    if (initialized.value) return
+    // Allow re-init if Realtime has gone down (not just any time initialized=true)
+    const realtimeIsDead = initialized.value && realtimeStatus.value === 'CLOSED'
+    if (initialized.value && !realtimeIsDead) return
     // If an init is already in flight, wait for it instead of starting a second
     // one. A second concurrent init() would create an orphaned Realtime channel
     // that reconnects forever (the root cause of the SUBSCRIBED/CLOSED loop).
@@ -200,10 +227,26 @@ export const useQueueStore = defineStore('queue', () => {
       services.value   = servicesData
       conditions.value = conditionsData
 
-      // Restore any in-progress turn for this agent's counter
-      const myCounter = counters.value.find(c => c.id === agentCounterId.value)
-      if (myCounter?.currentTurnId) {
-        activeTurn.value = turns.value.find(t => t.dbId === myCounter.currentTurnId) ?? null
+      // Restore any in-progress turn: agents see their counter's current call,
+      // FOH (no counter) shows whichever turn was most recently called system-wide.
+      if (agentCounterId.value != null) {
+        const myCounter = counters.value.find(c => c.id === agentCounterId.value)
+        if (myCounter?.currentTurnId) {
+          activeTurn.value = turns.value.find(t => t.dbId === myCounter.currentTurnId) ?? null
+        }
+      } else {
+        const calledTurns = turns.value
+          .filter(t => t.status === 'called')
+          .sort((a, b) =>
+            new Date(b.lastCalledAt || b.calledAt || 0) -
+            new Date(a.lastCalledAt || a.calledAt || 0))
+        activeTurn.value = calledTurns[0] ?? null
+      }
+
+      // Clean up old channel if reinitializing (e.g., after Realtime dropped)
+      if (_channel) {
+        _channel.unsubscribe()
+        _channel = null
       }
 
       _channel = subscribeToChanges({
@@ -215,15 +258,20 @@ export const useQueueStore = defineStore('queue', () => {
       })
 
       // Recover from idle / network blips: when the tab comes back to the foreground
-      // or the network comes back online, force a Realtime reconnect and resync.
+      // or the network comes back online, reconcile state. Only force a Realtime
+      // reconnect if the channel is actually unhealthy — forcing it while
+      // SUBSCRIBED causes a CLOSED→SUBSCRIBED loop on every tab switch.
       _onVisibilityChange = () => {
-        if (document.visibilityState === 'visible') {
+        if (document.visibilityState !== 'visible') return
+        if (realtimeStatus.value !== 'SUBSCRIBED') {
           _channel?.forceReconnect()
-          resyncFromServer()
         }
+        resyncFromServer()
       }
       _onOnline = () => {
-        _channel?.forceReconnect()
+        if (realtimeStatus.value !== 'SUBSCRIBED') {
+          _channel?.forceReconnect()
+        }
         resyncFromServer()
       }
       document.addEventListener('visibilitychange', _onVisibilityChange)
@@ -301,17 +349,102 @@ export const useQueueStore = defineStore('queue', () => {
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
+  //
+  // All mutating actions follow the OPTIMISTIC pattern:
+  //   1. Snapshot the current local state (so we can roll back on failure).
+  //   2. Mutate local state immediately — UI updates in <100ms.
+  //   3. await the DB call.
+  //   4. If it throws: restore the snapshot and surface the error.
+  //   5. The eventual Realtime postgres_changes event is idempotent — it
+  //      replaces our optimistic patch with the canonical fetchSingleTurn row.
+  //
+  // Why: Realtime can lag or drop events (browser throttles WebSocket on
+  // background tabs, weak Wi-Fi, reconnect races). Without optimistic updates
+  // the agent click looked dead until a page refresh. See memory note
+  // `queue_realtime_flow.md`.
+
+  function snapshotTurn(dbId) {
+    const idx = turns.value.findIndex(t => t.dbId === dbId)
+    return {
+      activeTurn: activeTurn.value ? { ...activeTurn.value } : null,
+      turnIdx:    idx,
+      turnRow:    idx >= 0 ? { ...turns.value[idx] } : null,
+      counters:   counters.value.map(c => ({ id: c.id, currentTurnId: c.currentTurnId })),
+    }
+  }
+
+  function restoreSnapshot(snap) {
+    activeTurn.value = snap.activeTurn
+    if (snap.turnIdx >= 0 && snap.turnRow) turns.value[snap.turnIdx] = snap.turnRow
+    for (const c of snap.counters) {
+      const live = counters.value.find(x => x.id === c.id)
+      if (live) live.currentTurnId = c.currentTurnId
+    }
+  }
+
+  function patchTurn(dbId, patch) {
+    const idx = turns.value.findIndex(t => t.dbId === dbId)
+    if (idx >= 0) turns.value[idx] = { ...turns.value[idx], ...patch }
+  }
+
+  function setCounterCurrent(counterId, dbId) {
+    if (counterId == null) return
+    const c = counters.value.find(x => x.id === counterId)
+    if (c) c.currentTurnId = dbId
+  }
+
+  // After a mutation rejects, decide whether to roll back. On timeout the DB
+  // request may have actually succeeded (common when the agent's tab was
+  // backgrounded and the browser throttled the network), so we verify the
+  // canonical row from the server before deciding. Non-timeout errors are
+  // treated as real failures and always roll back.
+  async function reconcileAfterMutationError(dbId, snap, e) {
+    const isTimeout = e?.message?.includes('timeout')
+    if (!isTimeout) {
+      restoreSnapshot(snap)
+      error.value = e.message
+      return
+    }
+    try {
+      const fresh = await fetchSingleTurn(dbId)
+      if (!fresh) { restoreSnapshot(snap); return }
+      const idx = turns.value.findIndex(t => t.dbId === dbId)
+      if (idx >= 0) turns.value[idx] = fresh
+      if (activeTurn.value?.dbId === dbId) activeTurn.value = { ...fresh }
+    } catch {
+      restoreSnapshot(snap)
+    }
+  }
 
   async function callNext() {
     if (activeTurn.value) return null
     const next = waitingTurns.value[0]
     if (!next) return null
     const calledAt = new Date().toISOString()
+    const snap = snapshotTurn(next.dbId)
+    const optimistic = {
+      ...next,
+      status:       'called',
+      counterId:    agentCounterId.value,
+      calledAt,
+      callCount:    1,
+      callLog:      [{ callNumber: 1, timestamp: calledAt }],
+      lastCalledAt: calledAt,
+    }
+    activeTurn.value = optimistic
+    patchTurn(next.dbId, optimistic)
+    setCounterCurrent(agentCounterId.value, next.dbId)
+    // Note: callSeq (chime + TTS) is driven by the Realtime UPDATE event in
+    // handleTurnoEvent, not here. Bumping it optimistically would cause a
+    // double-chime when the Realtime event arrives a moment later.
+    _mutationsInFlight++
     try {
       await dbCallTurn({ dbId: next.dbId, ventanillaId: agentCounterId.value, calledAt })
     } catch (e) {
-      error.value = e.message
+      await reconcileAfterMutationError(next.dbId, snap, e)
       return null
+    } finally {
+      _mutationsInFlight--
     }
     return next
   }
@@ -323,10 +456,18 @@ export const useQueueStore = defineStore('queue', () => {
     const newCount = (t.callCount || 1) + 1
     const now      = new Date().toISOString()
     const newLog   = [...(t.callLog || []), { callNumber: newCount, timestamp: now }]
+    const snap = snapshotTurn(t.dbId)
+    const patch = { callCount: newCount, callLog: newLog, lastCalledAt: now }
+    patchTurn(t.dbId, patch)
+    activeTurn.value = { ...activeTurn.value, ...patch }
+    // callSeq is bumped by Realtime — see note in callNext().
+    _mutationsInFlight++
     try {
       await dbRecallTurn({ dbId: t.dbId, callCount: newCount, callLog: newLog })
     } catch (e) {
-      error.value = e.message
+      await reconcileAfterMutationError(t.dbId, snap, e)
+    } finally {
+      _mutationsInFlight--
     }
   }
 
@@ -335,10 +476,18 @@ export const useQueueStore = defineStore('queue', () => {
     const durationSeconds = activeTurn.value.calledAt
       ? Math.round((Date.now() - new Date(activeTurn.value.calledAt).getTime()) / 1000)
       : null
+    const dbId = activeTurn.value.dbId
+    const snap = snapshotTurn(dbId)
+    patchTurn(dbId, { status: 'attended', durationMs: durationSeconds != null ? durationSeconds * 1000 : null })
+    activeTurn.value = null
+    setCounterCurrent(agentCounterId.value, null)
+    _mutationsInFlight++
     try {
-      await dbFinishTurn({ dbId: activeTurn.value.dbId, durationSeconds })
+      await dbFinishTurn({ dbId, durationSeconds })
     } catch (e) {
-      error.value = e.message
+      await reconcileAfterMutationError(dbId, snap, e)
+    } finally {
+      _mutationsInFlight--
     }
   }
 
@@ -347,48 +496,102 @@ export const useQueueStore = defineStore('queue', () => {
     const durationSeconds = activeTurn.value.calledAt
       ? Math.round((Date.now() - new Date(activeTurn.value.calledAt).getTime()) / 1000)
       : null
+    const dbId = activeTurn.value.dbId
+    const snap = snapshotTurn(dbId)
+    patchTurn(dbId, { status: 'skipped', noShowOccurred: true, noShowOverride: override })
+    activeTurn.value = null
+    setCounterCurrent(agentCounterId.value, null)
+    _mutationsInFlight++
     try {
-      await dbMarkNoShow({ dbId: activeTurn.value.dbId, override, durationSeconds })
+      await dbMarkNoShow({ dbId, override, durationSeconds })
     } catch (e) {
-      error.value = e.message
+      await reconcileAfterMutationError(dbId, snap, e)
+    } finally {
+      _mutationsInFlight--
     }
   }
 
   async function reinstateFromHistory(turnId) {
     const t = turns.value.find(t => t.id === turnId)
     if (!t) return
+    const snap = snapshotTurn(t.dbId)
+    patchTurn(t.dbId, {
+      status:         'deferred',
+      reinstated:     true,
+      calledAt:       null,
+      callCount:      0,
+      callLog:        [],
+      noShowOverride: false,
+      counterId:      null,
+    })
+    _mutationsInFlight++
     try {
       await dbReinstateTurn({ dbId: t.dbId })
     } catch (e) {
-      error.value = e.message
+      await reconcileAfterMutationError(t.dbId, snap, e)
+    } finally {
+      _mutationsInFlight--
     }
   }
 
   async function suspendTurn() {
     if (!activeTurn.value) return
+    const dbId = activeTurn.value.dbId
+    const snap = snapshotTurn(dbId)
+    patchTurn(dbId, { status: 'deferred' })
+    activeTurn.value = null
+    setCounterCurrent(agentCounterId.value, null)
+    _mutationsInFlight++
     try {
-      await dbSuspendTurn({ dbId: activeTurn.value.dbId })
+      await dbSuspendTurn({ dbId })
     } catch (e) {
-      error.value = e.message
+      await reconcileAfterMutationError(dbId, snap, e)
+    } finally {
+      _mutationsInFlight--
     }
   }
 
   async function cancelTurn(turnId) {
     const t = turns.value.find(t => t.id === turnId)
     if (!t) return
+    const snap = snapshotTurn(t.dbId)
+    patchTurn(t.dbId, { status: 'cancelled' })
+    if (activeTurn.value?.dbId === t.dbId) {
+      activeTurn.value = null
+      setCounterCurrent(agentCounterId.value, null)
+    }
+    _mutationsInFlight++
     try {
       await dbCancelTurn({ dbId: t.dbId })
     } catch (e) {
-      error.value = e.message
+      await reconcileAfterMutationError(t.dbId, snap, e)
+    } finally {
+      _mutationsInFlight--
     }
   }
 
   async function transferTurn(newCounterId) {
     if (!activeTurn.value) return
+    const dbId = activeTurn.value.dbId
+    const snap = snapshotTurn(dbId)
+    patchTurn(dbId, {
+      counterId:  newCounterId,
+      status:     'deferred',
+      reinstated: true,
+      calledAt:   null,
+      callCount:  0,
+    })
+    // Move currentTurnId from our counter to the new one
+    setCounterCurrent(agentCounterId.value, null)
+    setCounterCurrent(newCounterId, dbId)
+    activeTurn.value = null
+    _mutationsInFlight++
     try {
-      await dbTransferTurn({ dbId: activeTurn.value.dbId, newVentanillaId: newCounterId })
+      await dbTransferTurn({ dbId, newVentanillaId: newCounterId })
     } catch (e) {
-      error.value = e.message
+      await reconcileAfterMutationError(dbId, snap, e)
+    } finally {
+      _mutationsInFlight--
     }
   }
 

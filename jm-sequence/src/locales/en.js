@@ -75,6 +75,10 @@ export default {
   'kiosk.understood':       'Got it',
 
   // ── Agent ─────────────────────────────────────────────────────────────────
+  'agent.syncing':              'Syncing queue…',
+  'agent.realtime.live':        'Live',
+  'agent.realtime.reconnecting':'Reconnecting…',
+  'agent.realtime.offline':     'Offline',
   'agent.systemName':        'JM Sequence — Queue System',
   'agent.counter':           'COUNTER',
   'agent.callNext':          'CALL NEXT',
