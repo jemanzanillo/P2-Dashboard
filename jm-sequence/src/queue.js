@@ -63,13 +63,20 @@ export const useQueueStore = defineStore('queue', () => {
           turns.value.push(turn)
         }
 
-        // Keep activeTurn in sync for the agent (only their own active turn)
+        // Keep activeTurn in sync: clear it when the active turn is finished/deferred.
         if (activeTurn.value?.dbId === newRow.id) {
           if (['attended', 'skipped', 'cancelled', 'deferred'].includes(turn.status)) {
             activeTurn.value = null
           } else {
             activeTurn.value = { ...turn }
           }
+        }
+
+        // Agent: set activeTurn when any turn is called to their counter.
+        // callNext() only updates the DB — it relies on this Realtime path to
+        // populate activeTurn, which drives the turn-summary panel and action buttons.
+        if (agentCounterId.value != null && turn.counterId === agentCounterId.value && turn.status === 'called') {
+          activeTurn.value = { ...turn }
         }
 
         // FOH has no assigned counter (agentCounterId == null).
