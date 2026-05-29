@@ -16,4 +16,12 @@ export default defineConfig(({ command }) => ({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     },
   },
+  test: {
+    environment: 'node',
+    include: ['src/**/*.{test,spec}.js'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/queue.js'],
+    },
+  },
 }))

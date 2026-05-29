@@ -158,6 +158,23 @@ export const useAuthStore = defineStore('auth', () => {
     if (!error) profile.value = data
   }
 
+  // FOH/TV needs a real (anonymous) identity so it retains SELECT on `turnos`
+  // under RLS: Realtime enforces RLS on the base table and you cannot subscribe
+  // to a view, so a roleless anon client would receive no live updates once anon
+  // SELECT on turnos is removed. Idempotent — reuses any existing session.
+  // REQUIRES "Anonymous sign-ins" enabled in Supabase Auth settings (dashboard).
+  async function ensureAnonymous() {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) { user.value = session.user; return session.user }
+    const { data, error } = await supabase.auth.signInAnonymously()
+    if (error) {
+      console.error('[auth] signInAnonymously failed:', error.message)
+      throw error
+    }
+    user.value = data.user
+    return data.user
+  }
+
   async function login(email, password) {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
@@ -170,5 +187,5 @@ export const useAuthStore = defineStore('auth', () => {
     await supabase.auth.signOut({ scope: 'local' })
   }
 
-  return { user, profile, init, cleanup, login, logout, fetchProfile }
+  return { user, profile, init, cleanup, login, logout, fetchProfile, ensureAnonymous }
 })

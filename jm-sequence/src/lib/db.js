@@ -247,41 +247,38 @@ export async function fetchCounters() {
 
 export async function insertTurn({ serviceId, patientName, idNumber, condicionIds }) {
   console.log('[db] insertTurn: starting...', { serviceId, patientName, idNumber, condicionIds })
-  const prioridad = condicionIds?.length ? 'especial' : 'regular'
-  const payload = {
-    servicio_id:        serviceId,
-    prioridad,
-    estado:             'espera',
-    paciente_nombre:    patientName || null,
-    paciente_id_number: idNumber || null,
-    call_count:         0,
-    call_log:           [],
-    reinstated:         false,
-    no_show_occurred:   false,
-    // numero is NOT sent — DB trigger fn_generate_turno_numero() sets it automatically
-  }
-  console.log('[db] insertTurn: payload', payload)
-  const { data, error } = await supabase
-    .from('turnos')
-    .insert(payload)
-    .select('id, numero')
-    .single()
+  // Routed through the create_kiosk_turn SECURITY DEFINER RPC so the anonymous
+  // kiosk needs no SELECT/INSERT on the PII tables (turnos, turno_condiciones).
+  // The RPC inserts the turn (trigger assigns `numero`) + conditions atomically.
+  const { data, error } = await supabase.rpc('create_kiosk_turn', {
+    p_servicio_id:        serviceId,
+    p_paciente_nombre:    patientName || null,
+    p_paciente_id_number: idNumber || null,
+    p_condicion_ids:      condicionIds ?? [],
+  })
   console.log('[db] insertTurn: response', { data, error })
   if (error) {
     console.error('[db] insertTurn error:', error)
     throw error
   }
+  // RPC returns a one-row set: [{ id, numero }].
+  const row = Array.isArray(data) ? data[0] : data
+  console.log('[db] insertTurn: completed', row)
+  return row
+}
 
-  if (condicionIds?.length) {
-    console.log('[db] insertTurn: inserting condiciones...', condicionIds)
-    const { error: condError } = await supabase.from('turno_condiciones').insert(
-      condicionIds.map(cid => ({ turno_id: data.id, condicion_id: cid }))
-    )
-    if (condError) console.error('[db] insertTurn condiciones error:', condError)
+// Per-service waiting counts for the kiosk, with no PII exposure.
+// Backed by the get_waiting_counts() SECURITY DEFINER RPC so the kiosk works
+// after the RLS flip removes anon SELECT on turnos. Returns { [serviceId]: count }.
+export async function getWaitingCounts() {
+  const { data, error } = await supabase.rpc('get_waiting_counts')
+  if (error) {
+    console.error('[db] getWaitingCounts error:', error)
+    throw error
   }
-
-  console.log('[db] insertTurn: completed', data)
-  return data
+  const map = {}
+  for (const row of data ?? []) map[row.servicio_id] = Number(row.waiting_count)
+  return map
 }
 
 export async function callTurn({ dbId, ventanillaId, calledAt }) {

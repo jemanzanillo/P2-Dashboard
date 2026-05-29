@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useQueueStore } from '@/queue'
 import { useLocaleStore } from '@/locale.js'
+import { getWaitingCounts } from '@/lib/db.js'
 
 const store  = useQueueStore()
 const locale = useLocaleStore()
@@ -25,7 +26,21 @@ const CONDITIONS = computed(() =>
   store.conditions.map(c => ({ id: c.id, label: c.nombre, icono: c.icono }))
 )
 
-onMounted(() => store.init())
+// Per-service waiting counts come from a no-PII RPC (not from full turn rows),
+// so the kiosk keeps working after RLS removes anon SELECT on turnos. Polled
+// because the kiosk has no Realtime subscription on turnos under RLS.
+const waitingCounts = ref({})
+let countsTimer = null
+async function refreshCounts() {
+  try { waitingCounts.value = await getWaitingCounts() }
+  catch (e) { console.warn('[kiosk] getWaitingCounts failed', e) }
+}
+
+onMounted(() => {
+  store.init()
+  refreshCounts()
+  countsTimer = setInterval(refreshCounts, 5000)
+})
 
 // ── Service icons (inline SVG paths) ─────────────────────────────────────────
 const SERVICE_ICONS = {
@@ -42,11 +57,7 @@ const SERVICE_ICONS = {
 // ── Computed ──────────────────────────────────────────────────────────────────
 const waitingByService = computed(() => {
   const map = {}
-  for (const s of store.services) {
-    map[s.id] = store.turns.filter(
-      t => t.serviceID === s.id && (t.status === 'waiting' || t.status === 'deferred')
-    ).length
-  }
+  for (const s of store.services) map[s.id] = waitingCounts.value[s.id] ?? 0
   return map
 })
 
@@ -133,7 +144,10 @@ function resetToIdle() {
   resetCountdown.value  = 15
 }
 
-onUnmounted(() => clearInterval(resetTimer))
+onUnmounted(() => {
+  clearInterval(resetTimer)
+  clearInterval(countsTimer)
+})
 
 // ── Help overlay ──────────────────────────────────────────────────────────────
 const showHelp = ref(false)

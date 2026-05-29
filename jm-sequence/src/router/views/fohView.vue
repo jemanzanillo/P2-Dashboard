@@ -136,11 +136,13 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useQueueStore } from '@/queue'
+import { useAuthStore } from '@/auth.js'
 import { useTurnAnnouncer } from '@/composables/useTurnAnnouncer'
 import { useLocaleStore } from '@/locale.js'
 import FohVideoPlayer from '@/components/FohVideoPlayer.vue'
 
 const store  = useQueueStore()
+const auth   = useAuthStore()
 const locale = useLocaleStore()
 const { announce, audioReady, requestAudioPermission, dispose } = useTurnAnnouncer()
 
@@ -185,6 +187,13 @@ let _offAnnounce  = null
 let _resyncTimer  = null   // Gap C: periodic safety-net resync for always-on TV
 
 onMounted(async () => {
+  // FOH is a public screen, but under RLS it needs an authenticated identity to
+  // keep receiving live `turnos` updates (Realtime enforces RLS on the base
+  // table). Sign in anonymously before initializing the queue store. Failure is
+  // non-fatal so the screen still renders if anonymous sign-in is unavailable.
+  try { await auth.ensureAnonymous() }
+  catch (e) { console.warn('[foh] anonymous sign-in unavailable:', e?.message) }
+
   // FOH is a public screen — initialize the queue store directly if no
   // authenticated session is present (App.vue only inits on login).
   if (!store.initialized) await store.init()
