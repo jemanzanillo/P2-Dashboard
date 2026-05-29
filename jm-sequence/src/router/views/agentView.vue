@@ -52,13 +52,22 @@ onMounted(async () => {
     await store.init()
     store.setCounter(auth.profile?.ventanilla_id ?? null)
 
-    // If init failed due to authentication issue, redirect to login
-    if (store.error && !store.initialized) {
-        console.error('[agentView] Queue init failed — authentication error:', store.error)
-        // Don't call auth.logout() or store.cleanup() — just redirect; the auth
-        // watcher in App.vue will clean up if Supabase ends the session.
-        router.push('/login?reason=auth_failed')
-        return
+    // If init surfaced a session/connection error, redirect to login.
+    // Note: store.initialized is always true after init() completes (even on
+    // failure), so we check store.error alone here.
+    if (store.error) {
+        console.error('[agentView] Queue init failed:', store.error)
+        const isSessionError = store.error.toLowerCase().includes('expirada') ||
+            store.error.toLowerCase().includes('sesión') ||
+            store.error.toLowerCase().includes('unauthorized') ||
+            store.error.toLowerCase().includes('offline') ||
+            store.error.toLowerCase().includes('timeout')
+        if (isSessionError) {
+            router.push('/login?reason=auth_failed')
+            return
+        }
+        // Non-session error (e.g. transient network blip) — stay on the page
+        // so the agent can retry via Space/Enter; toast will show the message.
     }
 
     updateClock()
@@ -388,7 +397,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleKey))
                 </div>
 
                 <div v-if="actionError" class="action-error" role="alert" aria-live="assertive">
-                    <span aria-hidden="true">⚠</span> Error al guardar los cambios — por favor intenta de nuevo.
+                    <span aria-hidden="true">⚠</span> {{ actionError }}
                 </div>
 
                 <div class="turn-summary" v-if="store.activeTurn">
